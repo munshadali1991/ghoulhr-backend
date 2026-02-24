@@ -1,10 +1,39 @@
-import { Module } from '@nestjs/common';
+import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
+import { DatabaseModule } from './database/database.module';
+import databaseConfig from './database/database.config';
+
+import { OrganizationsModule } from './organizations/organizations.module';
+import { TenantResolverMiddleware } from './common/middleware/tenant-resolver.middleware';
+import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
+
 @Module({
-  imports: [],
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      load: [databaseConfig],
+      envFilePath:
+        process.env.NODE_ENV === 'production'
+          ? `${process.cwd()}/.env.production`
+          : `${process.cwd()}/.env`,
+    }),
+    DatabaseModule,
+    AuthModule,
+    UsersModule,
+    OrganizationsModule,
+  ],
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(TenantResolverMiddleware)
+      .forRoutes('*'); // apply globally
+  }
+}
