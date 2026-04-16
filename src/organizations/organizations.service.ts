@@ -1,18 +1,27 @@
-import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Not, Repository } from 'typeorm';
+import { randomBytes, scryptSync } from 'crypto';
 import { Organization } from './organization.entity';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { User } from '../users/user.entity';
+import { UsersService } from '../users/users.service';
+import { Role } from '../roles/roles.enum';
+import { EmailService } from '../modules/email';
 
 @Injectable()
 export class OrganizationsService {
+  private readonly logger = new Logger(OrganizationsService.name);
+  private readonly DEFAULT_ADMIN_PASSWORD = 'admin@123';
+
   constructor(
     @InjectRepository(Organization)
     private readonly organizationRepo: Repository<Organization>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    private readonly usersService: UsersService,
+    private readonly emailService: EmailService,
   ) {}
 
   async create(dto: CreateOrganizationDto) {
@@ -24,11 +33,47 @@ export class OrganizationsService {
       throw new ConflictException('Subdomain already exists');
     }
 
+    // Create organization first
     const organization = this.organizationRepo.create({
       ...dto,
       monthlySubscriptionAmount: dto.monthlySubscriptionAmount ?? 0,
     });
-    return this.organizationRepo.save(organization);
+    const savedOrganization = await this.organizationRepo.save(organization);
+
+    // Create default admin user if admin email is provided
+    if (dto.adminEmail) {
+      try {
+        const hashedPassword = this.hashPassword(this.DEFAULT_ADMIN_PASSWORD);
+        
+        await this.usersService.create({
+          organizationId: savedOrganization.id,
+          email: dto.adminEmail,
+          password: hashedPassword,
+          role: Role.ORG_ADMIN,
+        });
+
+        this.logger.log(
+          `Default admin user created for organization "${savedOrganization.subdomain}" with email: ${dto.adminEmail}`,
+        );
+
+        // Send credentials email to admin
+        await this.emailService.sendAdminCredentials({
+          to: dto.adminEmail,
+          organizationName: savedOrganization.name,
+          subdomain: savedOrganization.subdomain,
+          email: dto.adminEmail,
+          password: this.DEFAULT_ADMIN_PASSWORD,
+        });
+      } catch (error) {
+        this.logger.error(
+          `Failed to create admin user for organization "${savedOrganization.subdomain}": ${error.message}`,
+        );
+        // Don't fail organization creation if admin user creation fails
+        // Admin can be created manually later
+      }
+    }
+
+    return savedOrganization;
   }
 
   findAll() {
@@ -136,5 +181,11 @@ export class OrganizationsService {
       totalRevenue,
       organizationGrowth,
     };
+  }
+
+  private hashPassword(password: string) {
+    const salt = randomBytes(16).toString('hex');
+    const derived = scryptSync(password, salt, 64).toString('hex');
+    return `${salt}:${derived}`;
   }
 }

@@ -16,7 +16,7 @@ function isAllowedCorsOrigin(origin?: string) {
       return true;
     }
 
-    if (host === 'ghoulhr.com' || host.endsWith('.ghoulhr.com')) {
+    if (host === 'localhost' || host.endsWith('.localhost')) {
       return true;
     }
 

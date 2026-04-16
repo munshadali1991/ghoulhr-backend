@@ -4,9 +4,11 @@ import { Organization } from './organization.entity';
 import { OrganizationsService } from './organizations.service';
 import { OrganizationsController } from './organizations.controller';
 import { User } from '../users/user.entity';
+import { UsersModule } from '../users/users.module';
+import { EmailModule } from '../modules/email';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Organization, User])],
+  imports: [TypeOrmModule.forFeature([Organization, User]), UsersModule, EmailModule],
   providers: [OrganizationsService],
   controllers: [OrganizationsController],
   exports: [OrganizationsService],
