@@ -147,4 +147,16 @@ export class Organization extends BaseEntity {
     },
   })
   monthlySubscriptionAmount: number;
+
+  @Column({ nullable: true })
+  dbName?: string;
+
+  @Column({ nullable: true })
+  dbHost?: string;
+
+  @Column({ nullable: true })
+  dbUser?: string;
+
+  @Column({ nullable: true })
+  dbPassword?: string;
 }

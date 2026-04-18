@@ -11,6 +11,8 @@ import { OrganizationsModule } from './organizations/organizations.module';
 import { TenantResolverMiddleware } from './common/middleware/tenant-resolver.middleware';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
+import { DatabaseCoreModule } from './core/database/database-core.module';
+import { EmployeesModule } from './employees/employees.module';
 
 @Module({
   imports: [
@@ -23,9 +25,11 @@ import { UsersModule } from './users/users.module';
           : `${process.cwd()}/.env`,
     }),
     DatabaseModule,
+    DatabaseCoreModule,
     AuthModule,
     UsersModule,
     OrganizationsModule,
+    EmployeesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

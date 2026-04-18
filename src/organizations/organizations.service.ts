@@ -9,6 +9,10 @@ import { User } from '../users/user.entity';
 import { UsersService } from '../users/users.service';
 import { Role } from '../roles/roles.enum';
 import { EmailService } from '../modules/email';
+import { TenantConnectionManager } from '../core/database/tenant-connection.manager';
+import { MigrationRunnerService } from '../core/database/migration-runner.service';
+import { EmployeesService } from '../employees/employees.service';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class OrganizationsService {
@@ -22,6 +26,10 @@ export class OrganizationsService {
     private readonly userRepo: Repository<User>,
     private readonly usersService: UsersService,
     private readonly emailService: EmailService,
+    private readonly tenantConnectionManager: TenantConnectionManager,
+    private readonly migrationRunner: MigrationRunnerService,
+    private readonly employeesService: EmployeesService,
+    private readonly configService: ConfigService,
   ) {}
 
   async create(dto: CreateOrganizationDto) {
@@ -33,47 +41,146 @@ export class OrganizationsService {
       throw new ConflictException('Subdomain already exists');
     }
 
-    // Create organization first
-    const organization = this.organizationRepo.create({
-      ...dto,
-      monthlySubscriptionAmount: dto.monthlySubscriptionAmount ?? 0,
-    });
-    const savedOrganization = await this.organizationRepo.save(organization);
+    // Generate tenant database name
+    const dbName = this.generateDbName(dto.subdomain);
+    const dbHost = this.configService.get<string>('DB_HOST');
+    const dbUser = this.configService.get<string>('DB_USER');
+    const dbPassword = this.configService.get<string>('DB_PASS');
 
-    // Create default admin user if admin email is provided
-    if (dto.adminEmail) {
-      try {
-        const hashedPassword = this.hashPassword(this.DEFAULT_ADMIN_PASSWORD);
-        
-        await this.usersService.create({
-          organizationId: savedOrganization.id,
-          email: dto.adminEmail,
-          password: hashedPassword,
-          role: Role.ORG_ADMIN,
-        });
+    let savedOrganization: Organization | null = null;
+    let databaseCreated = false;
+
+    try {
+      // Step 1: Create organization record in master DB
+      const organization = this.organizationRepo.create({
+        ...dto,
+        monthlySubscriptionAmount: dto.monthlySubscriptionAmount ?? 0,
+        dbName,
+        dbHost,
+        dbUser,
+        dbPassword,
+      });
+      savedOrganization = await this.organizationRepo.save(organization);
+
+      this.logger.log(
+        `Organization record created in master DB: ${savedOrganization.id}`,
+      );
+
+      // Step 2: Create tenant database
+      await this.tenantConnectionManager.createDatabase(dbName);
+      databaseCreated = true;
+
+      this.logger.log(`Tenant database created: ${dbName}`);
+
+      // Step 3: Run migrations on tenant database
+      const tenantDataSource = await this.tenantConnectionManager.getOrCreateConnection(
+        savedOrganization,
+      );
+      await this.migrationRunner.runMigrations(tenantDataSource);
+
+      this.logger.log(`Migrations completed on tenant database: ${dbName}`);
+
+      // Step 4: Create admin user in tenant DB (as employee)
+      if (dto.adminEmail) {
+        const adminName = dto.adminName || dto.subdomain;
+        await this.employeesService.create(
+          {
+            globalUserId: '', // Will be updated after master DB user creation
+            name: adminName,
+            email: dto.adminEmail,
+            role: 'ADMIN',
+          },
+          tenantDataSource,
+        );
 
         this.logger.log(
-          `Default admin user created for organization "${savedOrganization.subdomain}" with email: ${dto.adminEmail}`,
+          `Admin employee created in tenant DB: ${dto.adminEmail}`,
         );
-
-        // Send credentials email to admin
-        await this.emailService.sendAdminCredentials({
-          to: dto.adminEmail,
-          organizationName: savedOrganization.name,
-          subdomain: savedOrganization.subdomain,
-          email: dto.adminEmail,
-          password: this.DEFAULT_ADMIN_PASSWORD,
-        });
-      } catch (error) {
-        this.logger.error(
-          `Failed to create admin user for organization "${savedOrganization.subdomain}": ${error.message}`,
-        );
-        // Don't fail organization creation if admin user creation fails
-        // Admin can be created manually later
       }
-    }
 
-    return savedOrganization;
+      // Step 5: Create default admin user in master DB
+      if (dto.adminEmail) {
+        try {
+          const hashedPassword = this.hashPassword(this.DEFAULT_ADMIN_PASSWORD);
+
+          const masterUser = await this.usersService.create({
+            organizationId: savedOrganization.id,
+            email: dto.adminEmail,
+            password: hashedPassword,
+            role: Role.ORG_ADMIN,
+          });
+
+          // Update employee's globalUserId
+          const tenantDataSource2 = await this.tenantConnectionManager.getOrCreateConnection(
+            savedOrganization,
+          );
+          const employee = await this.employeesService.findByEmail(
+            dto.adminEmail,
+            tenantDataSource2,
+          );
+          if (employee) {
+            const employeeRepo = tenantDataSource2.getRepository(
+              require('../employees/employee.entity').Employee,
+            );
+            employee.globalUserId = masterUser.id;
+            await employeeRepo.save(employee);
+          }
+
+          this.logger.log(
+            `Default admin user created for organization "${savedOrganization.subdomain}" with email: ${dto.adminEmail}`,
+          );
+
+          // Send credentials email to admin
+          await this.emailService.sendAdminCredentials({
+            to: dto.adminEmail,
+            organizationName: savedOrganization.name,
+            subdomain: savedOrganization.subdomain,
+            email: dto.adminEmail,
+            password: this.DEFAULT_ADMIN_PASSWORD,
+          });
+        } catch (error) {
+          this.logger.error(
+            `Failed to create admin user for organization "${savedOrganization.subdomain}": ${error.message}`,
+          );
+          // Don't fail organization creation if admin user creation fails
+          // Admin can be created manually later
+        }
+      }
+
+      return savedOrganization;
+    } catch (error) {
+      this.logger.error(
+        `Failed to create organization "${dto.subdomain}": ${error.message}`,
+      );
+
+      // Rollback: Drop tenant database if it was created
+      if (databaseCreated && dbName) {
+        try {
+          await this.tenantConnectionManager.dropDatabase(dbName);
+          this.logger.log(`Rolled back: Dropped tenant database ${dbName}`);
+        } catch (dropError) {
+          this.logger.error(
+            `Failed to drop tenant database ${dbName} during rollback: ${dropError.message}`,
+          );
+        }
+      }
+
+      // Rollback: Delete organization record from master DB
+      if (savedOrganization) {
+        try {
+          await this.organizationRepo.delete(savedOrganization.id);
+          this.logger.log(
+            `Rolled back: Deleted organization record ${savedOrganization.id}`,
+          );
+        } catch (deleteError) {
+          this.logger.error(
+            `Failed to delete organization record during rollback: ${deleteError.message}`,
+          );
+        }
+      }
+
+      throw error;
+    }
   }
 
   findAll() {
@@ -187,5 +294,10 @@ export class OrganizationsService {
     const salt = randomBytes(16).toString('hex');
     const derived = scryptSync(password, salt, 64).toString('hex');
     return `${salt}:${derived}`;
+  }
+
+  private generateDbName(subdomain: string): string {
+    const suffix = this.configService.get<string>('TENANT_DB_SUFFIX') || '_db';
+    return `${subdomain.replace(/[^a-zA-Z0-9]/g, '_')}${suffix}`;
   }
 }
