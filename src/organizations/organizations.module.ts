@@ -8,6 +8,7 @@ import { UsersModule } from '../users/users.module';
 import { EmailModule } from '../modules/email';
 import { DatabaseCoreModule } from '../core/database/database-core.module';
 import { EmployeesModule } from '../employees/employees.module';
+import { OrganizationRuntimeBootstrapService } from './organization-runtime-bootstrap.service';
 
 @Module({
   imports: [
@@ -17,7 +18,7 @@ import { EmployeesModule } from '../employees/employees.module';
     DatabaseCoreModule,
     EmployeesModule,
   ],
-  providers: [OrganizationsService],
+  providers: [OrganizationsService, OrganizationRuntimeBootstrapService],
   controllers: [OrganizationsController],
   exports: [OrganizationsService],
 })

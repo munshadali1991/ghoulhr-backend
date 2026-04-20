@@ -93,6 +93,15 @@ export class OrganizationsController {
     return this.organizationsService.restore(id);
   }
 
+  @Get('id/:id')
+  @ApiOperation({ summary: 'Find organization by id' })
+  @ApiParam({ name: 'id' })
+  @ApiResponse({ status: 200, type: Organization })
+  @ApiResponse({ status: 404, description: 'Organization not found' })
+  findById(@Param('id') id: string) {
+    return this.organizationsService.findById(id);
+  }
+
   @Get(':subdomain')
   @ApiOperation({ summary: 'Find organization by subdomain' })
   @ApiParam({ name: 'subdomain', example: 'acme' })

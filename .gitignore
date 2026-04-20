@@ -398,3 +398,7 @@ Temporary Items
 dist
 .webpack
 .serverless/**/*.zip
+
+# PM2 — generated per-machine org process list; local daemon home
+ecosystem.organizations.generated.config.js
+.pm2/

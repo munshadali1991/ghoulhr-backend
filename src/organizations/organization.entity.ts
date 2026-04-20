@@ -159,4 +159,7 @@ export class Organization extends BaseEntity {
 
   @Column({ nullable: true })
   dbPassword?: string;
+
+  @Column({ name: 'org_port', type: 'integer', nullable: true, unique: true })
+  orgPort?: number;
 }
