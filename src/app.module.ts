@@ -13,6 +13,7 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { DatabaseCoreModule } from './core/database/database-core.module';
 import { EmployeesModule } from './employees/employees.module';
+import { SettingsModule } from './settings/settings.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { EmployeesModule } from './employees/employees.module';
     UsersModule,
     OrganizationsModule,
     EmployeesModule,
+    SettingsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

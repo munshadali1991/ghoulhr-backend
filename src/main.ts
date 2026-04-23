@@ -38,13 +38,13 @@ async function bootstrap() {
     },
     credentials: true,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-bootstrap-admin-key'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-bootstrap-admin-key', 'x-org-id'],
   });
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
       forbidNonWhitelisted: true,
-      transform: false,
+      transform: true,
     }),
   );
   const swaggerConfig = new DocumentBuilder()

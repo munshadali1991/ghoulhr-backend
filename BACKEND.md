@@ -12,6 +12,7 @@ The GhoulHRMS backend is a **multi-tenant HR management system API** built with 
 - **Validation:** class-validator + class-transformer
 - **API Documentation:** Swagger/OpenAPI
 - **Runtime:** Node.js 20+
+- **Settings Management:** Key-value store with JSONB columns for organization preferences
 
 **Role in System:** Provides RESTful API endpoints consumed by the frontend application ([See Frontend Integration](./FRONTEND.md#api-integration-layer)) and enforces tenant isolation through subdomain-based middleware. Supports role-based dashboards for SUPER_ADMIN and ORG_ADMIN users.
 
@@ -58,11 +59,14 @@ backend/ghoulhr-backend/
 │   │   └── employees.module.ts
 │   ├── migrations/                    # Database migrations
 │   │   ├── tenant/                    # Tenant-specific migrations
-│   │   │   └── 1769000000001-create-employees-table.ts
+│   │   │   ├── 1769000000001-create-employees-table.ts
+│   │   │   ├── 1770000000000-create-organization-settings.ts
+│   │   │   └── 1771000000000-fix-organization-settings-timestamps.ts
 │   │   ├── 1768936823119-create-organizations.ts
 │   │   ├── 1768942400000-create-users.ts
 │   │   ├── 1768949800000-expand-organizations-profile.ts
-│   │   └── 1769000000000-add-tenant-db-fields-to-organizations.ts
+│   │   ├── 1769000000000-add-tenant-db-fields-to-organizations.ts
+│   │   └── 1769100000000-add-org-port-to-organizations.ts
 │   ├── modules/                       # Shared utility modules
 │   │   ├── email/                     # Email notification service
 │   │   │   ├── email.service.ts       # Email sending logic
@@ -86,6 +90,15 @@ backend/ghoulhr-backend/
 │   │   └── org-admin.module.ts
 │   ├── roles/
 │   │   └── roles.enum.ts              # SUPER_ADMIN, ORG_ADMIN, MANAGER, EMPLOYEE
+│   ├── settings/                      # Organization settings management
+│   │   ├── dto/
+│   │   │   └── create-setting.dto.ts  # Setting DTOs and validation
+│   │   ├── entities/
+│   │   │   └── organization-setting.entity.ts  # Settings entity
+│   │   ├── settings.constants.ts      # Setting keys and supported values
+│   │   ├── settings.controller.ts     # Settings CRUD endpoints
+│   │   ├── settings.service.ts        # Settings business logic
+│   │   └── settings.module.ts
 │   ├── users/
 │   │   ├── user-status.enum.ts
 │   │   ├── user.entity.ts
@@ -112,15 +125,27 @@ backend/ghoulhr-backend/
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   // ...
-  await app.listen(3000);
+  const port = Number(process.env.PORT || 3000);
+  await app.listen(port);
 }
 ```
 
+**Dynamic Port Configuration:**
+- Server port is configurable via `PORT` environment variable
+- Default port: `3000`
+- Supports multi-tenant proxy routing with organization-specific ports
+
 **Middleware Setup:**
-1. **CORS:** Allows `localhost`, `127.0.0.1`, `*.ghoulhr.com` origins with credentials
+1. **CORS:** Allows `localhost`, `*.localhost`, `127.0.0.1` origins with credentials
 2. **ValidationPipe:** Global DTO validation with whitelist enforcement
 3. **Swagger UI:** Available at `/api-docs` with JWT Bearer auth support
 4. **TenantResolverMiddleware:** Applied globally to all routes (see [Tenant Resolution](#7-tenant-resolution))
+
+**CORS Configuration:**
+```typescript
+// main.ts - Dynamic CORS origin validation
+allowedHeaders: ['Content-Type', 'Authorization', 'x-bootstrap-admin-key', 'x-org-id']
+```
 
 **Environment Configuration:**
 - Loads `.env` (development) or `.env.production` based on `NODE_ENV`
@@ -221,6 +246,155 @@ All endpoints require `Bearer` token and are scoped to the current tenant's data
 
 **Note:** Employee endpoints use `req.tenantDataSource` to query the organization's dedicated database.
 
+### Settings Endpoints (Tenant-Scoped)
+
+All endpoints require `Bearer` token with `TenantAuthGuard` and are scoped to the current tenant's database. These endpoints manage organization-level settings using a key-value store pattern.
+
+**Important Route Ordering:** Specific routes (profile, employee, attendance) MUST be defined before parameterized routes (`:key`) in the controller to prevent route conflicts.
+
+| Method | Route | Description | Access |
+|--------|-------|-------------|--------|
+| GET | `/settings` | Get all settings for organization | TenantAuthGuard |
+| GET | `/settings/:key` | Get specific setting by key | TenantAuthGuard |
+| POST | `/settings` | Create or update a setting | TenantAuthGuard |
+| GET | `/settings/profile` | Get organization profile (mapped object) | TenantAuthGuard |
+| POST | `/settings/profile` | Update organization profile (batch update) | TenantAuthGuard |
+| GET | `/settings/employee` | Get employee settings | TenantAuthGuard |
+| POST | `/settings/employee` | Update employee settings (bulk update) | TenantAuthGuard |
+| GET | `/settings/attendance` | Get attendance settings | TenantAuthGuard |
+| POST | `/settings/attendance` | Update attendance settings (bulk update) | TenantAuthGuard |
+
+**Request/Response Examples:**
+
+**Get Profile Response:**
+```json
+{
+  "name": "Acme Corporation",
+  "logo": "https://cdn.example.com/logo.png",
+  "timezone": "Asia/Kolkata",
+  "currency": "INR",
+  "dateFormat": "DD/MM/YYYY",
+  "language": "en"
+}
+```
+
+**Update Profile Request:**
+```json
+{
+  "name": "Acme Corp",
+  "timezone": "America/New_York",
+  "currency": "USD"
+}
+```
+
+**Update Profile Response:**
+```json
+{
+  "message": "Profile updated successfully",
+  "updates": {
+    "org.name": "Acme Corp",
+    "org.timezone": "America/New_York",
+    "org.currency": "USD"
+  }
+}
+```
+
+**Attendance Settings Request:**
+```json
+{
+  "working_days": ["Mon", "Tue", "Wed", "Thu", "Fri"],
+  "shifts": [
+    {
+      "name": "Morning Shift",
+      "start_time": "09:00",
+      "end_time": "18:00",
+      "break_minutes": 60
+    },
+    {
+      "name": "Evening Shift",
+      "start_time": "14:00",
+      "end_time": "22:00",
+      "break_minutes": 30
+    }
+  ],
+  "grace_period_minutes": 10,
+  "half_day_threshold_minutes": 240,
+  "overtime_enabled": true,
+  "overtime_rules": {
+    "max_hours_per_day": 2,
+    "multiplier": 1.5
+  },
+  "tracking_mode": "manual",
+  "geo_fencing_enabled": false,
+  "allowed_ip_addresses": ["192.168.1.1", "10.0.0.0/24"]
+}
+```
+
+**Attendance Settings Response:**
+```json
+{
+  "message": "Attendance settings updated successfully",
+  "updates": {
+    "attendance.working_days": ["Mon", "Tue", "Wed", "Thu", "Fri"],
+    "attendance.shifts": [...],
+    "attendance.grace_period_minutes": 10,
+    "attendance.half_day_threshold_minutes": 240,
+    "attendance.overtime_enabled": true,
+    "attendance.overtime_rules": {...},
+    "attendance.tracking_mode": "manual",
+    "attendance.geo_fencing_enabled": false,
+    "attendance.allowed_ip_addresses": ["192.168.1.1", "10.0.0.0/24"]
+  }
+}
+```
+
+**Shift Object Structure:**
+```typescript
+{
+  name: string;              // Shift name (required)
+  start_time: string;        // HH:mm format (required)
+  end_time: string;          // HH:mm format (required)
+  break_minutes?: number;    // Break duration in minutes (optional)
+}
+```
+
+**Attendance Validation Rules:**
+- `working_days`: Valid weekdays only (Mon-Sun), no duplicates, at least one required
+- `shifts`: Non-empty array, valid HH:mm format, end_time must be after start_time
+- `grace_period_minutes`: Number >= 0
+- `half_day_threshold_minutes`: Number >= 0
+- `tracking_mode`: One of: "manual", "biometric", "geo", "ip"
+- `allowed_ip_addresses`: Valid IPv4 format with optional CIDR notation (e.g., "192.168.1.1" or "10.0.0.0/24")
+
+**Settings Constants:**
+- **Supported Currencies:** `INR`, `USD`, `EUR`, `GBP`
+- **Supported Timezones:** `Asia/Kolkata`, `America/New_York`, `America/Chicago`, `America/Los_Angeles`, `Europe/London`, `Asia/Singapore`, `Australia/Sydney`
+- **Supported Date Formats:** `DD/MM/YYYY`, `MM/DD/YYYY`, `YYYY-MM-DD`, `DD-MM-YYYY`
+- **Supported Languages:** `en` (English), `hi` (Hindi), `es` (Spanish), `fr` (French)
+- **Valid Weekdays:** `Mon`, `Tue`, `Wed`, `Thu`, `Fri`, `Sat`, `Sun`
+- **Valid Tracking Modes:** `manual`, `biometric`, `geo`, `ip`
+
+**Setting Keys:**
+- `org.name` - Organization name
+- `org.logo` - Organization logo URL
+- `org.timezone` - Timezone setting
+- `org.currency` - Currency code
+- `org.date_format` - Date format pattern
+- `org.language` - Language code
+- `employee.id_prefix` - Employee ID prefix (e.g., "EMP")
+- `employee.auto_generate_id` - Auto-generate employee IDs (boolean)
+- `employee.required_fields` - Required employee fields (array)
+- `employee.default_probation_period` - Default probation period in days (number)
+- `attendance.working_days` - Working days array (e.g., ["Mon", "Tue", "Wed", "Thu", "Fri"])
+- `attendance.shifts` - Shift configurations (array of shift objects)
+- `attendance.grace_period_minutes` - Grace period for late check-in (number)
+- `attendance.half_day_threshold_minutes` - Minutes before marking half-day (number)
+- `attendance.overtime_enabled` - Overtime tracking enabled (boolean)
+- `attendance.overtime_rules` - Overtime calculation rules (object)
+- `attendance.tracking_mode` - Attendance tracking mode: "manual" | "biometric" | "geo" | "ip"
+- `attendance.geo_fencing_enabled` - Geo-fencing enabled (boolean)
+- `attendance.allowed_ip_addresses` - Allowed IP addresses for attendance (array)
+
 ### Request/Response Formats
 
 **Login Request:**
@@ -266,14 +440,50 @@ All endpoints require `Bearer` token and are scoped to the current tenant's data
 ```
 
 **Organization Creation Behavior:**
-When an organization is created with `adminEmail`:
-1. Organization record is created in database
-2. Default admin user is automatically created with:
-   - Email: exact value from `adminEmail` field (no subdomain mapping)
-   - Password: `admin@123` (static default password)
-   - Role: `ORG_ADMIN`
-3. Credentials email is sent to admin via EmailService
-4. Admin can immediately login using subdomain + email + password
+When an organization is created, the system performs automated tenant provisioning:
+
+1. **Organization Record Creation:**
+   - Creates organization record in master database
+   - Auto-assigns `orgPort` starting from 6000
+   - Generates tenant database credentials (dbName, dbHost, dbUser, dbPassword)
+
+2. **Tenant Database Provisioning:**
+   - Creates dedicated PostgreSQL database for the organization
+   - Runs all pending tenant migrations on the new database
+   - Initializes database schema (employees, settings, etc.)
+
+3. **Admin User Provisioning:**
+   - If `adminEmail` is provided, creates default admin user with:
+     - Email: exact value from `adminEmail` field (no subdomain mapping)
+     - Password: `admin@123` (static default password)
+     - Role: `ORG_ADMIN`
+   - Sends credentials email to admin via EmailService
+   - Admin can immediately login using subdomain + email + password
+
+4. **Error Handling & Rollback:**
+   - If any step fails, system performs automatic rollback:
+     - Drops tenant database if created
+     - Deletes organization record from master DB
+   - Ensures no partial/orphaned resources
+
+**Example Flow:**
+```typescript
+// 1. Create org record with orgPort
+dbName = "org_acme"
+orgPort = 6001
+
+// 2. Create and migrate tenant database
+CREATE DATABASE org_acme
+RUN MIGRATIONS: employees, settings, etc.
+
+// 3. Create admin user
+email: "admin@acme.com"
+password: "admin@123"
+role: ORG_ADMIN
+
+// 4. Send credentials email
+await emailService.sendAdminCredentials(...)
+```
 
 ---
 
@@ -290,6 +500,7 @@ When an organization is created with `adminEmail`:
 | subdomain | string | Unique, indexed | Tenant subdomain |
 | status | enum | ACTIVE/INACTIVE | Account status |
 | monthlySubscriptionAmount | numeric(12,2) | Default: 0 | Monthly billing |
+| orgPort | number | Nullable, unique | Organization-specific port for proxy routing |
 | + 40+ optional fields | various | Nullable | Address, compliance, payroll, admin details |
 | dbName | string | Nullable | Tenant database name |
 | dbHost | string | Nullable | Tenant database host |
@@ -301,6 +512,13 @@ When an organization is created with `adminEmail`:
 
 **Tenant Database Fields:**
 The `dbName`, `dbHost`, `dbUser`, and `dbPassword` fields enable isolated database-per-tenant architecture. When these fields are set, the TenantConnectionManager creates dedicated connections to each organization's database.
+
+**Organization Port (orgPort):**
+The `orgPort` field enables organization-specific port assignment for multi-tenant proxy routing. When an organization is created:
+1. System auto-assigns the next available port starting from 6000
+2. Port is tracked to prevent conflicts
+3. Proxy server uses this port to route requests to the correct organization's backend instance
+4. Enables horizontal scaling with multiple backend instances per organization
 
 ### Entity: User
 
@@ -414,6 +632,178 @@ export class EmployeesModule {}
 ```
 
 **Note:** Uses `forwardRef()` to resolve circular dependency with AuthModule.
+
+---
+
+## 6.7. Settings Module (Tenant-Scoped)
+
+**Location:** `src/settings/`
+
+The settings module manages organization-level preferences and configuration using a key-value store pattern stored in tenant databases. This enables each organization to customize their regional settings, branding, and preferences.
+
+### OrganizationSetting Entity
+
+**File:** [organization-setting.entity.ts](file:///d:/Web%20dev/ghoulhr/backend/ghoulhr-backend/src/settings/entities/organization-setting.entity.ts)
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| id | UUID | PK, auto-generated | Unique identifier |
+| key | string | Required, Unique | Setting key (e.g., "org.name") |
+| value | jsonb | Required | Setting value (flexible JSON storage) |
+| createdAt | timestamptz | Auto | Creation timestamp |
+| updatedAt | timestamptz | Auto | Last update timestamp |
+| deletedAt | timestamptz | Nullable | Soft delete timestamp |
+
+**Design Pattern:** Key-value store with JSONB allows flexible schema-less settings storage while maintaining type safety through DTOs.
+
+### SettingsService
+
+**File:** [settings.service.ts](file:///d:/Web%20dev/ghoulhr/backend/ghoulhr-backend/src/settings/settings.service.ts)
+
+**Methods:**
+
+| Method | Description | Parameters | Returns |
+|--------|-------------|------------|---------|
+| `getSetting()` | Get a single setting by key | key, dataSource | OrganizationSetting |
+| `getAllSettings()` | Get all settings for org | dataSource | OrganizationSetting[] |
+| `setSetting()` | Create or update a setting | key, value, dataSource | OrganizationSetting |
+| `getOrgProfile()` | Get profile as mapped object | dataSource | Record<string, any> |
+| `updateOrgProfile()` | Batch update profile fields | dto, dataSource | Record<string, any> |
+| `getEmployeeSettings()` | Get employee settings | dataSource | Record<string, any> |
+| `updateEmployeeSettings()` | Update employee settings | dto, dataSource | Record<string, any> |
+| `getAttendanceSettings()` | Get attendance settings | dataSource | Record<string, any> |
+| `updateAttendanceSettings()` | Update attendance settings | dto, dataSource | Record<string, any> |
+| `getDefaultShift()` | Get first configured shift | dataSource | ShiftDto or null |
+
+**Profile Mapping Logic:**
+```typescript
+// Internal setting keys → Frontend-friendly field names
+const mapping = {
+  'org.name': 'name',
+  'org.logo': 'logo',
+  'org.timezone': 'timezone',
+  'org.currency': 'currency',
+  'org.date_format': 'dateFormat',
+  'org.language': 'language',
+};
+```
+
+### SettingsController
+
+**File:** [settings.controller.ts](file:///d:/Web%20dev/ghoulhr/backend/ghoulhr-backend/src/settings/settings.controller.ts)
+
+**Endpoints:**
+
+| Method | Route | Description | Access |
+|--------|-------|-------------|--------|
+| GET | `/settings` | Get all settings | TenantAuthGuard |
+| GET | `/settings/:key` | Get setting by key | TenantAuthGuard |
+| POST | `/settings` | Create/update setting | TenantAuthGuard |
+| GET | `/settings/profile` | Get org profile | TenantAuthGuard |
+| POST | `/settings/profile` | Update org profile | TenantAuthGuard |
+| GET | `/settings/employee` | Get employee settings | TenantAuthGuard |
+| POST | `/settings/employee` | Update employee settings | TenantAuthGuard |
+| GET | `/settings/attendance` | Get attendance settings | TenantAuthGuard |
+| POST | `/settings/attendance` | Update attendance settings | TenantAuthGuard |
+
+**Route Ordering (CRITICAL):**
+In NestJS, routes are matched in the order they're defined. Specific routes MUST come before parameterized routes:
+
+```typescript
+// ✅ CORRECT ORDER:
+@Get('profile')        // Specific route
+@Get('employee')       // Specific route
+@Get('attendance')     // Specific route
+@Get(':key')           // Parameterized route (comes last)
+
+// ❌ WRONG ORDER (causes 404):
+@Get(':key')           // This would catch /settings/attendance!
+@Get('attendance')     // Never reached
+```
+
+This prevents `/settings/attendance` from being incorrectly matched by `@Get(':key')` where `key = 'attendance'`.
+
+**Tenant Database Integration:**
+- Uses `req.tenantDataSource` from tenant resolver middleware
+- All operations are scoped to the current organization's database
+- Settings are stored in the tenant-specific `organization_settings` table
+
+### Settings Constants
+
+**File:** [settings.constants.ts](file:///d:/Web%20dev/ghoulhr/backend/ghoulhr-backend/src/settings/settings.constants.ts)
+
+```typescript
+export const SETTING_KEYS = {
+  ORG_NAME: 'org.name',
+  ORG_LOGO: 'org.logo',
+  ORG_TIMEZONE: 'org.timezone',
+  ORG_CURRENCY: 'org.currency',
+  ORG_DATE_FORMAT: 'org.date_format',
+  ORG_LANGUAGE: 'org.language',
+  EMPLOYEE_ID_PREFIX: 'employee.id_prefix',
+  EMPLOYEE_AUTO_GENERATE_ID: 'employee.auto_generate_id',
+  EMPLOYEE_REQUIRED_FIELDS: 'employee.required_fields',
+  EMPLOYEE_DEFAULT_PROBATION_PERIOD: 'employee.default_probation_period',
+  ATTENDANCE_WORKING_DAYS: 'attendance.working_days',
+  ATTENDANCE_SHIFTS: 'attendance.shifts',
+  ATTENDANCE_GRACE_PERIOD: 'attendance.grace_period_minutes',
+  ATTENDANCE_HALF_DAY_THRESHOLD: 'attendance.half_day_threshold_minutes',
+  ATTENDANCE_OVERTIME_ENABLED: 'attendance.overtime_enabled',
+  ATTENDANCE_OVERTIME_RULES: 'attendance.overtime_rules',
+  ATTENDANCE_TRACKING_MODE: 'attendance.tracking_mode',
+  ATTENDANCE_GEO_FENCING_ENABLED: 'attendance.geo_fencing_enabled',
+  ATTENDANCE_ALLOWED_IPS: 'attendance.allowed_ip_addresses',
+} as const;
+
+export const SUPPORTED_CURRENCIES = ['INR', 'USD', 'EUR', 'GBP'] as const;
+export const SUPPORTED_TIMEZONES = [
+  'Asia/Kolkata',
+  'America/New_York',
+  'America/Chicago',
+  'America/Los_Angeles',
+  'Europe/London',
+  'Asia/Singapore',
+  'Australia/Sydney',
+] as const;
+export const SUPPORTED_DATE_FORMATS = [
+  'DD/MM/YYYY',
+  'MM/DD/YYYY',
+  'YYYY-MM-DD',
+  'DD-MM-YYYY',
+] as const;
+export const SUPPORTED_LANGUAGES = ['en', 'hi', 'es', 'fr'] as const;
+export const ALLOWED_EMPLOYEE_FIELDS = [
+  'name',
+  'email',
+  'phone',
+  'department',
+  'position',
+  'hire_date',
+  'salary',
+  'address',
+  'emergency_contact',
+] as const;
+export const VALID_WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
+export const VALID_TRACKING_MODES = ['manual', 'biometric', 'geo', 'ip'] as const;
+```
+
+### SettingsModule
+
+**File:** [settings.module.ts](file:///d:/Web%20dev/ghoulhr/backend/ghoulhr-backend/src/settings/settings.module.ts)
+
+```typescript
+@Module({
+  controllers: [SettingsController],
+  providers: [SettingsService],
+  exports: [SettingsService],
+})
+export class SettingsModule {}
+```
+
+**Integration:**
+- Registered in `AppModule` imports
+- Uses `TenantAuthGuard` for tenant-scoped access control
+- Integrates with tenant database connection from middleware
 
 ---
 
@@ -636,6 +1026,10 @@ export class EmployeesController { ... }
 - `/api-docs` - Swagger documentation
 - `/health` - Health check endpoint
 
+**Additional Headers:**
+- `x-org-id` - Optional header for multi-tenant settings API (used by SettingsController)
+- `x-bootstrap-admin-key` - Required for bootstrap super admin endpoint
+
 **Impact on Auth:**
 - Login first searches users within `req.organization.id` (tenant-scoped)
 - **Enhanced:** If user not found in tenant org, searches globally (for SUPER_ADMIN access)
@@ -729,7 +1123,23 @@ cp .env.development .env
 ```bash
 # Run pending migrations
 npx typeorm migration:run -d typeorm.config.ts
+
+# Tenant migrations are automatically run on new tenant database creation
+# Manual tenant migration execution (if needed):
+# See MigrationRunnerService.runMigrations(dataSource)
 ```
+
+**Master Database Migrations:**
+- `1768936823119` - Create organizations table
+- `1768942400000` - Create users table
+- `1768949800000` - Expand organizations profile (40+ fields)
+- `1769000000000` - Add tenant DB fields to organizations
+- `1769100000000` - Add orgPort to organizations
+
+**Tenant Database Migrations:**
+- `1769000000001` - Create employees table
+- `1770000000000` - Create organization_settings table
+- `1771000000000` - Fix organization_settings timestamps (timestamptz)
 
 ### Development
 ```bash
@@ -774,6 +1184,12 @@ npm run test:cov         # Coverage report
 14. **Tenant Migration System:** Dedicated migration runner for tenant-specific database schemas
 15. **Comprehensive Employee Management:** Full CRUD operations for employees with tenant database isolation
 16. **Circular Dependency Resolution:** Proper use of `forwardRef()` for complex module interdependencies
+17. **Flexible Settings Management:** Key-value store with JSONB for organization preferences
+18. **Profile Mapping Layer:** Automatic translation between internal setting keys and frontend-friendly field names
+19. **Validation Constants:** Centralized constants for supported currencies, timezones, date formats, languages, weekdays, and tracking modes
+20. **Dynamic CORS Configuration:** Subdomain-aware CORS validation for multi-tenant access
+21. **Attendance & Shift Management:** Comprehensive attendance settings with dynamic shift configurations, validation, and multiple tracking modes
+22. **Route Ordering Best Practice:** Specific routes defined before parameterized routes to prevent route conflicts
 
 ### ⚠️ Security Concerns
 1. **Custom JWT Implementation:** Not using industry-standard `@nestjs/jwt` library; potential for subtle vulnerabilities
@@ -783,21 +1199,26 @@ npm run test:cov         # Coverage report
 5. **CORS Wildcard for Localhost:** Allows any localhost origin in development
 
 ### 🚀 Scalability Suggestions
-1. **Add Redis Caching:** Cache organization lookups in tenant middleware
-2. **Database Indexing:** Add indexes on frequently queried fields (email, subdomain)
+1. **Add Redis Caching:** Cache organization lookups and settings in tenant middleware
+2. **Database Indexing:** Add indexes on frequently queried fields (email, subdomain, setting keys)
 3. **Pagination:** Organizations list endpoint returns all records; implement pagination
 4. **API Versioning:** Add `/api/v1/` prefix for future compatibility
 5. **Separate Auth Module:** Move JWT logic to dedicated `@nestjs/jwt` + `@nestjs/passport`
-6. **Audit Logging:** Track organization CRUD operations for compliance
+6. **Audit Logging:** Track organization CRUD operations and settings changes for compliance
 7. **Health Checks:** Add `/health` endpoint for monitoring
 8. **Email Provider Integration:** Implement real email sending in EmailService (SendGrid, AWS SES, etc.)
 9. **Configurable Admin Password:** Make default admin password configurable via environment variables
 10. **Employee Onboarding Automation:** Extend email service for employee credential delivery
 11. **Implement ORG_ADMIN Endpoints:** Build `/org-admin/*` endpoints for employees, attendance, payroll management
 12. **Role-Based API Gateway:** Separate SUPER_ADMIN and ORG_ADMIN endpoint routing
-13. **Automated Tenant Provisioning:** Auto-create tenant database and run migrations on organization creation
+13. **Automated Tenant Provisioning:** Auto-create tenant database and run migrations on organization creation (✅ Partially implemented)
 14. **Connection Pool Monitoring:** Add metrics for tenant database connection pool usage
 15. **Tenant Database Backup:** Implement automated backup system for tenant databases
+16. **Settings Caching:** Cache frequently accessed settings to reduce database queries
+17. **Settings Validation:** Add runtime validation for setting values based on key type (✅ Implemented for attendance settings)
+18. **Bulk Settings Import/Export:** Allow organizations to export/import settings as JSON
+19. **Shift Overlap Detection:** Prevent overlapping shifts in attendance configuration
+20. **Attendance Rules Engine:** Build business logic for late/early/absent calculations using attendance settings
 
 ### 🐛 Potential Bugs
 1. **Token Expiry Parsing:** `parseTtlToSeconds()` may fail on edge cases like `0s` or negative values
@@ -806,6 +1227,7 @@ npm run test:cov         # Coverage report
 4. **No Email Verification:** Users can register without confirming email ownership
 5. **Static Admin Password:** Default password `admin@123` should be rotated or made configurable
 6. **~~Cross-Tenant Login Conflicts:~~** ~~SUPER_ADMIN login may return wrong role if same email exists in multiple orgs~~ **FIXED:** Login logic now prioritizes SUPER_ADMIN role when multiple users found
+7. **Settings Timestamp Migration:** Initial migration used `timestamp` instead of `timestamptz` (fixed in migration `1771000000000`)
 
 ### 📝 Code Quality
 - **Excellent:** Consistent TypeScript usage, proper DTOs, separation of concerns
@@ -817,3 +1239,14 @@ npm run test:cov         # Coverage report
 - **Added:** Tenant-scoped employee management with dedicated database connections
 - **Added:** Core database infrastructure with connection pooling and migration management
 - **Added:** TenantResolverMiddleware now provides both organization context and database connections
+- **Added:** Settings module with key-value store for organization preferences
+- **Added:** Profile mapping layer for frontend-backend settings translation
+- **Added:** Validation constants for supported regional settings (currencies, timezones, etc.)
+- **Added:** Organization port tracking for multi-tenant proxy routing
+- **Added:** Tenant database auto-provisioning on organization creation
+- **Added:** Attendance and shift settings management with comprehensive validation
+- **Added:** Dynamic shift configuration with nested DTO validation
+- **Added:** Custom validators for time-based business rules (start_time < end_time)
+- **Added:** Multiple attendance tracking modes (manual, biometric, geo, IP-based)
+- **Added:** IP address validation with CIDR notation support
+- **Fixed:** Route ordering in SettingsController to prevent parameterized routes from catching specific routes

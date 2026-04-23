@@ -116,8 +116,24 @@ async function start() {
   console.log(`[proxy] connected to postgres, starting on ${PROXY_PORT}`);
 
   const server = http.createServer(async (req, res) => {
+    // Handle CORS preflight requests
+    if (req.method === 'OPTIONS') {
+      res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, PUT, PATCH, POST, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-bootstrap-admin-key, x-org-id');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+
     try {
       const target = await resolveTarget(req.headers.host);
+      
+      // Add CORS headers to all responses
+      res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      
       proxy.web(req, res, { target });
     } catch (error) {
       res.statusCode = 502;
