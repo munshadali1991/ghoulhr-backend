@@ -1,5 +1,14 @@
-import { Body, Controller, Headers, Post, Req } from '@nestjs/common';
-import type { Request } from 'express';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Post,
+  Req,
+  Res,
+  UnauthorizedException,
+} from '@nestjs/common';
+import type { Request, Response } from 'express';
 import {
   ApiBody,
   ApiHeader,
@@ -12,11 +21,46 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { BootstrapSuperAdminDto } from './dto/bootstrap-super-admin.dto';
+import { AuthCookieService } from './auth-cookie.service';
+import { AuthRefreshService } from './auth-refresh.service';
+import { AuthTokenPayload } from './auth.types';
 
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly authCookieService: AuthCookieService,
+    private readonly authRefreshService: AuthRefreshService,
+  ) {}
+
+  @Get('session')
+  @ApiOperation({ summary: 'Current session from access cookie (or Bearer for tooling)' })
+  @ApiResponse({ status: 200, description: 'Authenticated user profile' })
+  @ApiResponse({ status: 401, description: 'Missing or invalid access token' })
+  getSession(@Req() req: Request) {
+    const token = this.authCookieService.readAccessToken(req);
+    if (!token) {
+      throw new UnauthorizedException('Not authenticated');
+    }
+    const payload = this.authService.verifyAccessToken(token);
+    return { user: this.mapSessionUser(payload) };
+  }
+
+  @Post('refresh')
+  @ApiOperation({ summary: 'Rotate refresh cookie and re-issue access cookie' })
+  @ApiResponse({ status: 200, description: 'Cookies updated' })
+  @ApiResponse({ status: 401, description: 'Invalid refresh session' })
+  async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    return this.authRefreshService.refresh(req, res);
+  }
+
+  @Post('logout')
+  @ApiOperation({ summary: 'Revoke refresh session and clear auth cookies' })
+  @ApiResponse({ status: 200, description: 'Logged out' })
+  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    return this.authRefreshService.logout(req, res);
+  }
 
   @Post('register')
   @ApiOperation({ summary: 'Register a user in the tenant organization' })
@@ -30,12 +74,15 @@ export class AuthController {
   @ApiResponse({ status: 400, description: 'Invalid payload or organization' })
   @ApiResponse({ status: 403, description: 'Role assignment forbidden' })
   @ApiResponse({ status: 409, description: 'User already exists in organization' })
-  register(
+  async register(
     @Body() dto: RegisterDto,
     @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
     @Headers('x-bootstrap-admin-key') bootstrapAdminKey?: string,
   ) {
-    return this.authService.register(dto, req, bootstrapAdminKey);
+    const result = await this.authService.register(dto, req, bootstrapAdminKey);
+    this.authCookieService.attachAuthCookies(res, result.accessToken, result.refreshPlain);
+    return { user: result.user };
   }
 
   @Post('login')
@@ -44,8 +91,14 @@ export class AuthController {
   @ApiResponse({ status: 201, type: AuthResponseDto })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
   @ApiResponse({ status: 403, description: 'User inactive' })
-  login(@Body() dto: LoginDto, @Req() req: Request) {
-    return this.authService.login(dto, req);
+  async login(
+    @Body() dto: LoginDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.login(dto, req);
+    this.authCookieService.attachAuthCookies(res, result.accessToken, result.refreshPlain);
+    return { user: result.user };
   }
 
   @Post('superadmin/bootstrap')
@@ -59,10 +112,25 @@ export class AuthController {
   @ApiResponse({ status: 201, type: AuthResponseDto })
   @ApiResponse({ status: 403, description: 'Invalid bootstrap key' })
   @ApiResponse({ status: 409, description: 'SUPER_ADMIN already exists' })
-  bootstrapSuperAdmin(
+  async bootstrapSuperAdmin(
     @Body() dto: BootstrapSuperAdminDto,
     @Headers('x-bootstrap-admin-key') bootstrapAdminKey: string,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.authService.bootstrapSuperAdmin(dto, bootstrapAdminKey);
+    const result = await this.authService.bootstrapSuperAdmin(dto, bootstrapAdminKey);
+    this.authCookieService.attachAuthCookies(res, result.accessToken, result.refreshPlain);
+    return { user: result.user };
+  }
+
+  private mapSessionUser(payload: AuthTokenPayload) {
+    return {
+      id: payload.sub,
+      organizationId: payload.organizationId,
+      organizationSubdomain: payload.organizationSubdomain,
+      email: payload.email,
+      role: payload.role,
+      ...(payload.employeeCode ? { employeeCode: payload.employeeCode } : {}),
+      ...(payload.name ? { name: payload.name } : {}),
+    };
   }
 }

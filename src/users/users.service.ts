@@ -53,6 +53,13 @@ export class UsersService {
     });
   }
 
+  findById(id: string) {
+    return this.userRepo.findOne({
+      where: { id },
+      relations: ['organization'],
+    });
+  }
+
   async hasAnySuperAdmin() {
     const total = await this.userRepo.count({
       where: { role: Role.SUPER_ADMIN },

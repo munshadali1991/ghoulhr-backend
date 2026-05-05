@@ -3,13 +3,16 @@ import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
 import { ROLES_KEY } from '../../common/decorators/roles.decorator';
 import { Role } from '../../roles/roles.enum';
+import { EmployeeRole } from '../../employees/employee.entity';
+
+type AnyRole = Role | EmployeeRole;
 
 @Injectable()
 export class RolesGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
-    const requiredRoles = this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, [
+    const requiredRoles = this.reflector.getAllAndOverride<AnyRole[]>(ROLES_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
@@ -19,7 +22,7 @@ export class RolesGuard implements CanActivate {
     }
 
     const req = context.switchToHttp().getRequest<Request>();
-    const role = (req as any).user?.role as Role | undefined;
+    const role = (req as any).user?.role as AnyRole | undefined;
     if (!role || !requiredRoles.includes(role)) {
       throw new ForbiddenException('Insufficient role');
     }

@@ -429,14 +429,15 @@ export class OrganizationsService {
       const tenantDataSource = await this.tenantConnectionManager.getOrCreateConnection(organization);
       const existingEmployee = await this.employeesService.findByEmail(adminEmail, tenantDataSource);
       if (!existingEmployee) {
+        // Create ORG_ADMIN employee in tenant database
         await this.employeesService.create(
           {
-            globalUserId: masterUser.id,
             name: organization.adminName || organization.subdomain,
             email: adminEmail,
-            role: 'ADMIN',
+            role: 'ORG_ADMIN' as any,
           },
           tenantDataSource,
+          masterUser.id, // createdBy
         );
       }
     } catch (error) {

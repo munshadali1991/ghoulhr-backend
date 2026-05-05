@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Role } from '../../roles/roles.enum';
 
 export class AuthUserDto {
@@ -19,12 +19,11 @@ export class AuthUserDto {
 }
 
 export class AuthResponseDto {
-  @ApiProperty({
-    description: 'Signed bearer token',
-    example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
-  })
-  accessToken: string;
-
   @ApiProperty({ type: AuthUserDto })
   user: AuthUserDto;
+
+  @ApiPropertyOptional({
+    description: 'Deprecated: access and refresh tokens are issued as HttpOnly cookies on the API host.',
+  })
+  accessToken?: string;
 }

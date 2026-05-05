@@ -16,7 +16,8 @@ export interface TenantRequest extends Request {
 export class TenantResolverMiddleware implements NestMiddleware {
   private readonly logger = new Logger(TenantResolverMiddleware.name);
   private readonly excludedPaths = [
-    '/api/auth/superadmin/bootstrap',
+    '/auth',
+    '/api/auth',
     '/api/super-admin',
     '/api-docs',
     '/health',
@@ -68,6 +69,11 @@ export class TenantResolverMiddleware implements NestMiddleware {
     const subdomain = this.extractSubdomain(host, mainDomain);
     if (!subdomain) {
       return next(); // No subdomain, skip
+    }
+
+    const apiSubdomain = (this.configService.get<string>('API_SUBDOMAIN') ?? 'api').trim().toLowerCase();
+    if (subdomain.toLowerCase() === apiSubdomain) {
+      return next();
     }
 
     // 3. Fetch Organization from Master DB

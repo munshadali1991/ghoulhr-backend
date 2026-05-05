@@ -1,7 +1,13 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
+
+/** HR onboarding sends base64 documents; default Express limit (~100kb) returns 413. */
+const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT ?? '100mb';
 
 function isAllowedCorsOrigin(origin?: string) {
   if (!origin) {
@@ -16,7 +22,7 @@ function isAllowedCorsOrigin(origin?: string) {
       return true;
     }
 
-    if (host === 'localhost' || host.endsWith('.localhost')) {
+    if (host.endsWith('.localhost')) {
       return true;
     }
 
@@ -27,11 +33,45 @@ function isAllowedCorsOrigin(origin?: string) {
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const configService = app.get(ConfigService);
+
+  app.use(cookieParser());
+
+  if (
+    configService.get<string>('TRUST_PROXY') === 'true' ||
+    configService.get<string>('NODE_ENV') === 'production'
+  ) {
+    app.set('trust proxy', 1);
+  }
+
+  app.useBodyParser('json', { limit: JSON_BODY_LIMIT });
+  app.useBodyParser('urlencoded', { limit: JSON_BODY_LIMIT, extended: true });
+
+  const originsRaw = configService.get<string>('WEB_APP_ORIGINS')?.trim();
+  const webAppAllowlist = originsRaw
+    ? originsRaw
+        .split(',')
+        .map((o) => o.trim())
+        .filter(Boolean)
+    : [];
+
   app.enableCors({
     origin: (origin, callback) => {
-      if (isAllowedCorsOrigin(origin)) {
+      if (!origin) {
         callback(null, true);
+        return;
+      }
+      if (webAppAllowlist.length > 0) {
+        if (webAppAllowlist.includes(origin)) {
+          callback(null, origin);
+          return;
+        }
+        callback(new Error(`CORS blocked for origin: ${origin}`), false);
+        return;
+      }
+      if (isAllowedCorsOrigin(origin)) {
+        callback(null, origin);
         return;
       }
       callback(new Error(`CORS blocked for origin: ${origin}`), false);
@@ -56,7 +96,7 @@ async function bootstrap() {
         type: 'http',
         scheme: 'bearer',
         bearerFormat: 'JWT',
-        description: 'Enter access token in format: Bearer <token>',
+        description: 'Optional: Bearer token for tooling. Production clients use HttpOnly cookies.',
       },
       'bearer',
     )

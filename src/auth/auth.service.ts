@@ -18,6 +18,7 @@ import { OrganizationStatus } from '../organizations/organization-status.enum';
 import { UserStatus } from '../users/user-status.enum';
 import { AuthTokenPayload } from './auth.types';
 import { BootstrapSuperAdminDto } from './dto/bootstrap-super-admin.dto';
+import { RefreshSessionService } from './refresh-session.service';
 
 interface TenantAwareRequest extends Request {
   organization?: { id: string };
@@ -32,6 +33,7 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly organizationsService: OrganizationsService,
     private readonly configService: ConfigService,
+    private readonly refreshSessionService: RefreshSessionService,
   ) {}
 
   async register(dto: RegisterDto, req: TenantAwareRequest, bootstrapAdminKey?: string) {
@@ -171,17 +173,23 @@ export class AuthService {
       throw new UnauthorizedException('Organization not found for authenticated user');
     }
 
-    const accessToken = this.generateAccessToken({
+    const accessToken = this.mintAccessToken({
       sub: userId,
       organizationId,
       organizationSubdomain: organization.subdomain,
       email,
       role,
-      exp: this.getTokenExpiry(),
     });
+
+    const refreshExpires = this.getRefreshExpiryDate();
+    const { plain: refreshPlain } = await this.refreshSessionService.issueMasterSession(
+      userId,
+      refreshExpires,
+    );
 
     return {
       accessToken,
+      refreshPlain,
       user: {
         id: userId,
         organizationId,
@@ -192,23 +200,61 @@ export class AuthService {
     };
   }
 
+  /** Public: mint a short-lived access token (shared with tenant employee auth). */
+  mintAccessToken(
+    payload: Omit<AuthTokenPayload, 'exp'> & Partial<Pick<AuthTokenPayload, 'employeeCode' | 'name'>>,
+  ): string {
+    const full: AuthTokenPayload = {
+      ...payload,
+      exp: this.getAccessTokenExpiryEpoch(),
+    };
+    return this.generateAccessToken(full);
+  }
+
+  getRefreshTtlMs(): number {
+    const raw = this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') ?? '7d';
+    const sec = this.parseTtlToSeconds(raw) ?? 7 * 24 * 60 * 60;
+    return sec * 1000;
+  }
+
+  getRefreshExpiryDate(): Date {
+    return new Date(Date.now() + this.getRefreshTtlMs());
+  }
+
   private async resolveLoginUser(req: TenantAwareRequest, email: string) {
     const tenantOrganizationId = req.organization?.id;
+    
+    // First attempt: Search in tenant organization (if available)
     if (tenantOrganizationId) {
-      return this.usersService.findByEmailAndOrganization(email, tenantOrganizationId);
+      const tenantUser = await this.usersService.findByEmailAndOrganization(email, tenantOrganizationId);
+      if (tenantUser) {
+        return tenantUser;
+      }
     }
 
+    // Enhanced: If user not found in tenant org, search globally across all organizations
+    // This allows SUPER_ADMIN to login from any subdomain
     const candidates = await this.usersService.findByEmail(email);
+    
     if (candidates.length === 0) {
       return null;
     }
 
+    // SUPER_ADMIN Priority: If multiple users found with same email, prioritize SUPER_ADMIN role
     if (candidates.length > 1) {
+      const superAdmin = candidates.find(c => c.role === Role.SUPER_ADMIN);
+      if (superAdmin) {
+        this.logger.log(`Multiple users found for email ${email}, prioritizing SUPER_ADMIN role`);
+        return superAdmin;
+      }
+      
+      // If no SUPER_ADMIN, throw error to prevent ambiguity
       throw new ForbiddenException(
         'Multiple organizations found for this email. Please login from your organization subdomain.',
       );
     }
 
+    // Single candidate found
     return candidates[0];
   }
 
@@ -261,9 +307,11 @@ export class AuthService {
     return createHmac('sha256', secret).update(value).digest('base64url');
   }
 
-  private getTokenExpiry() {
-    const jwtTtl = this.configService.get<string>('JWT_EXPIRES_IN');
-    const ttlSeconds = this.parseTtlToSeconds(jwtTtl) ?? 8 * 60 * 60;
+  private getAccessTokenExpiryEpoch(): number {
+    const jwtTtl =
+      this.configService.get<string>('JWT_ACCESS_EXPIRES_IN') ??
+      this.configService.get<string>('JWT_EXPIRES_IN');
+    const ttlSeconds = this.parseTtlToSeconds(jwtTtl) ?? 15 * 60;
     return Math.floor(Date.now() / 1000) + ttlSeconds;
   }
 

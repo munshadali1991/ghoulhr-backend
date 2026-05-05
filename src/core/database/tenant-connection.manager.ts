@@ -154,6 +154,7 @@ export class TenantConnectionManager implements OnModuleDestroy {
       logging: this.configService.get<string>('NODE_ENV') === 'development',
       entities: [
         __dirname + '/../../employees/*.entity{.ts,.js}',
+        __dirname + '/../../employees/entities/*.entity{.ts,.js}',
         __dirname + '/../../settings/entities/*.entity{.ts,.js}',
       ],
       migrations: [__dirname + '/../../migrations/tenant/*.js'],

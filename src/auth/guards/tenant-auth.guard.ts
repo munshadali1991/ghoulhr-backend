@@ -1,7 +1,8 @@
 import { Injectable, CanActivate, ExecutionContext, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { Request } from 'express';
-import { AuthService } from '../../auth/auth.service';
-import { AuthTokenPayload } from '../../auth/auth.types';
+import { AuthService } from '../auth.service';
+import { AuthTokenPayload } from '../auth.types';
+import { AuthCookieService } from '../auth-cookie.service';
 
 export interface TenantAuthRequest extends Request {
   organization?: any;
@@ -10,23 +11,19 @@ export interface TenantAuthRequest extends Request {
 
 @Injectable()
 export class TenantAuthGuard implements CanActivate {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly authCookieService: AuthCookieService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<TenantAuthRequest>();
-    
-    // Get authorization header
-    const authHeader = request.headers.authorization;
-    if (!authHeader) {
-      throw new UnauthorizedException('Missing authorization header');
+
+    const token = this.authCookieService.readAccessToken(request);
+    if (!token) {
+      throw new UnauthorizedException('Missing authentication');
     }
 
-    // Extract token
-    const token = authHeader.startsWith('Bearer ') 
-      ? authHeader.substring(7) 
-      : authHeader;
-
-    // Verify token
     const user = this.authService.verifyAccessToken(token);
     
     // Attach user to request

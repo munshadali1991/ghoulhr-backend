@@ -4,7 +4,11 @@ export interface AuthTokenPayload {
   sub: string;
   organizationId: string;
   organizationSubdomain: string;
-  role: Role;
+  /** Master `Role` or tenant `EmployeeRole` string */
+  role: Role | string;
   email: string;
   exp: number;
+  /** Present for tenant employee tokens */
+  employeeCode?: string;
+  name?: string;
 }
