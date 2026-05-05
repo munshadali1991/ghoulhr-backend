@@ -10,7 +10,7 @@ The backend is a NestJS 11 multi-tenant HR API with:
 
 ## Stack
 
-- NestJS 11 + TypeScript
+- NestJS 11 + TypeScript 
 - TypeORM + PostgreSQL
 - class-validator + class-transformer
 - Swagger (`/api-docs`)
