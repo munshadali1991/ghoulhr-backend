@@ -1,5 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsNotEmpty, IsOptional, IsString, Matches, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Matches,
+  MinLength,
+} from 'class-validator';
 
 export class BootstrapSuperAdminDto {
   @ApiProperty({ example: 'superadmin@ghoulhr.com' })
@@ -23,7 +30,8 @@ export class BootstrapSuperAdminDto {
   @IsString()
   @IsNotEmpty()
   @Matches(/^[a-z0-9-]+$/, {
-    message: 'subdomain can only contain lowercase letters, numbers, and hyphens',
+    message:
+      'subdomain can only contain lowercase letters, numbers, and hyphens',
   })
   subdomain?: string;
 }

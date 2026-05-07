@@ -2,8 +2,12 @@ import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { OrganizationsService } from './organizations.service';
 
 @Injectable()
-export class OrganizationRuntimeBootstrapService implements OnApplicationBootstrap {
-  private readonly logger = new Logger(OrganizationRuntimeBootstrapService.name);
+export class OrganizationRuntimeBootstrapService
+  implements OnApplicationBootstrap
+{
+  private readonly logger = new Logger(
+    OrganizationRuntimeBootstrapService.name,
+  );
 
   constructor(private readonly organizationsService: OrganizationsService) {}
 

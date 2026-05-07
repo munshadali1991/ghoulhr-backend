@@ -11,7 +11,10 @@ export class SuperAdminBootstrapService implements OnApplicationBootstrap {
     try {
       await this.authService.ensureDefaultSuperAdmin();
     } catch (error) {
-      this.logger.error('Failed to ensure default SUPER_ADMIN during bootstrap', error as Error);
+      this.logger.error(
+        'Failed to ensure default SUPER_ADMIN during bootstrap',
+        error as Error,
+      );
     }
   }
 }

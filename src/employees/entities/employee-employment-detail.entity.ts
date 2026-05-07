@@ -46,4 +46,19 @@ export class EmployeeEmploymentDetail extends BaseEntity {
 
   @Column({ nullable: true })
   costCenter?: string;
+
+  @Column({ nullable: true })
+  previousCompanyName?: string;
+
+  @Column({ nullable: true })
+  previousDesignation?: string;
+
+  @Column({ type: 'numeric', precision: 5, scale: 2, nullable: true })
+  totalExperienceYears?: string;
+
+  @Column({ type: 'numeric', precision: 14, scale: 2, nullable: true })
+  lastDrawnCtc?: string;
+
+  @Column({ type: 'text', nullable: true })
+  experienceSummary?: string;
 }

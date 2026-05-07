@@ -16,21 +16,32 @@ export class PasswordService {
    */
   async hashPassword(password: string): Promise<string> {
     const salt = randomBytes(this.saltLength).toString('hex');
-    const derivedKey = (await scryptAsync(password, salt, this.keyLength)) as Buffer;
+    const derivedKey = (await scryptAsync(
+      password,
+      salt,
+      this.keyLength,
+    )) as Buffer;
     return `${salt}:${derivedKey.toString('hex')}`;
   }
 
   /**
    * Verify a password against a stored hash
    */
-  async verifyPassword(candidate: string, storedHash: string): Promise<boolean> {
+  async verifyPassword(
+    candidate: string,
+    storedHash: string,
+  ): Promise<boolean> {
     try {
       const [salt, storedDerivedKey] = storedHash.split(':');
       if (!salt || !storedDerivedKey) {
         return false;
       }
 
-      const derivedKey = (await scryptAsync(candidate, salt, this.keyLength)) as Buffer;
+      const derivedKey = (await scryptAsync(
+        candidate,
+        salt,
+        this.keyLength,
+      )) as Buffer;
       const derivedKeyHex = derivedKey.toString('hex');
 
       // Timing-safe comparison to prevent timing attacks
@@ -101,7 +112,10 @@ export class PasswordService {
   /**
    * Validate password strength for new passwords
    */
-  validatePasswordStrength(password: string): { valid: boolean; errors: string[] } {
+  validatePasswordStrength(password: string): {
+    valid: boolean;
+    errors: string[];
+  } {
     const errors: string[] = [];
 
     if (password.length < 12) {
@@ -121,7 +135,9 @@ export class PasswordService {
     }
 
     if (!/[@$!%*?&#]/.test(password)) {
-      errors.push('Password must contain at least one special character (@$!%*?&#)');
+      errors.push(
+        'Password must contain at least one special character (@$!%*?&#)',
+      );
     }
 
     return {

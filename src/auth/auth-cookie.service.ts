@@ -7,11 +7,17 @@ export class AuthCookieService {
   constructor(private readonly configService: ConfigService) {}
 
   getAccessCookieName(): string {
-    return this.configService.get<string>('AUTH_ACCESS_COOKIE_NAME') ?? 'ghoulhr_access';
+    return (
+      this.configService.get<string>('AUTH_ACCESS_COOKIE_NAME') ??
+      'ghoulhr_access'
+    );
   }
 
   getRefreshCookieName(): string {
-    return this.configService.get<string>('AUTH_REFRESH_COOKIE_NAME') ?? 'ghoulhr_refresh';
+    return (
+      this.configService.get<string>('AUTH_REFRESH_COOKIE_NAME') ??
+      'ghoulhr_refresh'
+    );
   }
 
   /** Prefer HttpOnly access cookie; fall back to Authorization for tooling. */
@@ -35,7 +41,9 @@ export class AuthCookieService {
   }
 
   private sameSite(): 'lax' | 'strict' | 'none' {
-    const raw = (this.configService.get<string>('COOKIE_SAMESITE') ?? 'lax').toLowerCase();
+    const raw = (
+      this.configService.get<string>('COOKIE_SAMESITE') ?? 'lax'
+    ).toLowerCase();
     if (raw === 'strict' || raw === 'none') {
       return raw;
     }
@@ -45,7 +53,11 @@ export class AuthCookieService {
   /**
    * Host-only cookies (no Domain): scoped to the API host (e.g. api.example.com).
    */
-  attachAuthCookies(res: Response, accessToken: string, refreshToken: string): void {
+  attachAuthCookies(
+    res: Response,
+    accessToken: string,
+    refreshToken: string,
+  ): void {
     const secure = this.isSecure();
     const sameSite = this.sameSite();
     const common = {
@@ -74,14 +86,23 @@ export class AuthCookieService {
   }
 
   private accessCookieMaxAgeMs(): number {
-    return this.parseDurationToMs(this.configService.get<string>('JWT_ACCESS_EXPIRES_IN'), 15 * 60 * 1000);
+    return this.parseDurationToMs(
+      this.configService.get<string>('JWT_ACCESS_EXPIRES_IN'),
+      15 * 60 * 1000,
+    );
   }
 
   private refreshCookieMaxAgeMs(): number {
-    return this.parseDurationToMs(this.configService.get<string>('JWT_REFRESH_EXPIRES_IN'), 7 * 24 * 60 * 60 * 1000);
+    return this.parseDurationToMs(
+      this.configService.get<string>('JWT_REFRESH_EXPIRES_IN'),
+      7 * 24 * 60 * 60 * 1000,
+    );
   }
 
-  private parseDurationToMs(value: string | undefined, fallbackMs: number): number {
+  private parseDurationToMs(
+    value: string | undefined,
+    fallbackMs: number,
+  ): number {
     if (!value?.trim()) {
       return fallbackMs;
     }

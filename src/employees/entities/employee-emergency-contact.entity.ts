@@ -4,7 +4,9 @@ import { Employee } from '../employee.entity';
 
 @Entity('employee_emergency_contacts')
 export class EmployeeEmergencyContact extends BaseEntity {
-  @OneToOne(() => Employee, (e) => e.emergencyContactDetail, { onDelete: 'CASCADE' })
+  @OneToOne(() => Employee, (e) => e.emergencyContactDetail, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'employeeId' })
   employee: Employee;
 

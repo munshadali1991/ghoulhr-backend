@@ -61,106 +61,152 @@ export class TenantAuthService {
     // If subdomain is provided in DTO, use it to find the organization
     if (dto.subdomain) {
       this.logger.log(`Subdomain provided in login request: ${dto.subdomain}`);
-      
+
       try {
         // Find organization by subdomain
-        targetOrganization = await this.organizationsService.findBySubdomain(dto.subdomain);
-        
+        targetOrganization = await this.organizationsService.findBySubdomain(
+          dto.subdomain,
+        );
+
         if (!targetOrganization) {
-          this.logger.error(`Organization not found for subdomain: ${dto.subdomain}`);
+          this.logger.error(
+            `Organization not found for subdomain: ${dto.subdomain}`,
+          );
           throw new UnauthorizedException('Invalid credentials');
         }
-        
+
         // Get or create tenant data source for this organization
         targetDataSource = await this.getTenantDataSource(targetOrganization);
-        this.logger.log(`✓ Connected to organization: ${targetOrganization.subdomain} - ${targetOrganization.dbName}`);
+        this.logger.log(
+          `✓ Connected to organization: ${targetOrganization.subdomain} - ${targetOrganization.dbName}`,
+        );
       } catch (error) {
-        this.logger.error(`Failed to connect to organization ${dto.subdomain}: ${error.message}`);
+        this.logger.error(
+          `Failed to connect to organization ${dto.subdomain}: ${error.message}`,
+        );
         throw new UnauthorizedException('Invalid credentials');
       }
     }
     // If tenantDataSource is provided (from middleware), try to find employee in that tenant first
     // If not found, search across all organizations (fallback for automatic detection)
     else if (tenantDataSource && organization) {
-      this.logger.log(`Tenant context provided: ${organization.subdomain}, attempting login...`);
-      
+      this.logger.log(
+        `Tenant context provided: ${organization.subdomain}, attempting login...`,
+      );
+
       // Try to find employee in the current tenant
-      employee = await this.employeesService.findByEmail(email, tenantDataSource);
-      
+      employee = await this.employeesService.findByEmail(
+        email,
+        tenantDataSource,
+      );
+
       if (!employee) {
-        this.logger.log(`Employee not found in ${organization.subdomain}, searching all organizations...`);
-        
+        this.logger.log(
+          `Employee not found in ${organization.subdomain}, searching all organizations...`,
+        );
+
         // Fallback: Search through all organizations
         const allOrganizations = await this.organizationsService.findAll();
-        this.logger.log(`Found ${allOrganizations.length} organizations to search`);
-        
+        this.logger.log(
+          `Found ${allOrganizations.length} organizations to search`,
+        );
+
         for (const org of allOrganizations) {
           try {
-            this.logger.log(`Checking organization: ${org.subdomain} (${org.dbName})`);
+            this.logger.log(
+              `Checking organization: ${org.subdomain} (${org.dbName})`,
+            );
             const orgDataSource = await this.getTenantDataSource(org);
-            const foundEmployee = await this.employeesService.findByEmail(email, orgDataSource);
-            
+            const foundEmployee = await this.employeesService.findByEmail(
+              email,
+              orgDataSource,
+            );
+
             if (foundEmployee) {
               employee = foundEmployee;
               targetOrganization = org;
               targetDataSource = orgDataSource;
-              this.logger.log(`✓ Found employee in organization: ${org.subdomain} - Role: ${foundEmployee.role}`);
+              this.logger.log(
+                `✓ Found employee in organization: ${org.subdomain} - Role: ${foundEmployee.role}`,
+              );
               break;
             } else {
               this.logger.log(`✗ No employee found in ${org.subdomain}`);
             }
           } catch (error) {
             // Skip organizations that can't be connected
-            this.logger.warn(`Skipping organization ${org.subdomain}: ${error.message}`);
+            this.logger.warn(
+              `Skipping organization ${org.subdomain}: ${error.message}`,
+            );
             continue;
           }
         }
 
         if (!employee) {
-          this.logger.error(`Employee not found in any organization for email: ${email}`);
+          this.logger.error(
+            `Employee not found in any organization for email: ${email}`,
+          );
           throw new UnauthorizedException('Invalid credentials');
         }
       }
     }
     // If tenantDataSource is not provided (e.g., from root domain), find organization by email
     else if (!tenantDataSource) {
-      this.logger.log(`No tenant data source provided, finding organization by email: ${email}`);
-      
+      this.logger.log(
+        `No tenant data source provided, finding organization by email: ${email}`,
+      );
+
       // Find the organization by searching through all organizations
       const allOrganizations = await this.organizationsService.findAll();
-      this.logger.log(`Found ${allOrganizations.length} organizations to search`);
-      
+      this.logger.log(
+        `Found ${allOrganizations.length} organizations to search`,
+      );
+
       for (const org of allOrganizations) {
         try {
-          this.logger.log(`Checking organization: ${org.subdomain} (${org.dbName})`);
+          this.logger.log(
+            `Checking organization: ${org.subdomain} (${org.dbName})`,
+          );
           const orgDataSource = await this.getTenantDataSource(org);
-          const foundEmployee = await this.employeesService.findByEmail(email, orgDataSource);
-          
+          const foundEmployee = await this.employeesService.findByEmail(
+            email,
+            orgDataSource,
+          );
+
           if (foundEmployee) {
             employee = foundEmployee;
             targetOrganization = org;
             targetDataSource = orgDataSource;
-            this.logger.log(`✓ Found employee in organization: ${org.subdomain} - Role: ${foundEmployee.role}`);
+            this.logger.log(
+              `✓ Found employee in organization: ${org.subdomain} - Role: ${foundEmployee.role}`,
+            );
             break;
           } else {
             this.logger.log(`✗ No employee found in ${org.subdomain}`);
           }
         } catch (error) {
           // Skip organizations that can't be connected
-          this.logger.warn(`Skipping organization ${org.subdomain}: ${error.message}`);
+          this.logger.warn(
+            `Skipping organization ${org.subdomain}: ${error.message}`,
+          );
           continue;
         }
       }
 
       if (!employee) {
-        this.logger.error(`Employee not found in any organization for email: ${email}`);
+        this.logger.error(
+          `Employee not found in any organization for email: ${email}`,
+        );
         throw new UnauthorizedException('Invalid credentials');
       }
     }
 
     // Find employee in tenant database if not already found
     if (!employee) {
-      employee = await this.employeesService.findByEmail(email, targetDataSource);
+      employee = await this.employeesService.findByEmail(
+        email,
+        targetDataSource,
+      );
     }
 
     if (!employee) {
@@ -175,13 +221,18 @@ export class TenantAuthService {
 
     if (!isPasswordValid) {
       // Record failed login attempt
-      await this.employeesService.recordFailedLogin(employee.id, targetDataSource);
+      await this.employeesService.recordFailedLogin(
+        employee.id,
+        targetDataSource,
+      );
       throw new UnauthorizedException('Invalid credentials');
     }
 
     // Check account status
     if (employee.status === EmployeeStatus.INACTIVE) {
-      throw new ForbiddenException('Your account is inactive. Please contact HR.');
+      throw new ForbiddenException(
+        'Your account is inactive. Please contact HR.',
+      );
     }
 
     if (employee.status === EmployeeStatus.TERMINATED) {
@@ -214,11 +265,12 @@ export class TenantAuthService {
     });
 
     const refreshExpires = this.authService.getRefreshExpiryDate();
-    const { plain: refreshPlain } = await this.refreshSessionService.issueEmployeeSession(
-      employee.id,
-      targetOrganization.id,
-      refreshExpires,
-    );
+    const { plain: refreshPlain } =
+      await this.refreshSessionService.issueEmployeeSession(
+        employee.id,
+        targetOrganization.id,
+        refreshExpires,
+      );
 
     const response: TenantEmployeeLoginResponse = {
       accessToken,
@@ -257,7 +309,10 @@ export class TenantAuthService {
     dto: ChangePasswordDto,
     tenantDataSource: DataSource,
   ): Promise<{ message: string; mustChangePassword: boolean }> {
-    const employee = await this.employeesService.findById(employeeId, tenantDataSource);
+    const employee = await this.employeesService.findById(
+      employeeId,
+      tenantDataSource,
+    );
 
     if (!employee) {
       throw new UnauthorizedException('Employee not found');
@@ -274,13 +329,19 @@ export class TenantAuthService {
     }
 
     // Validate new password strength
-    const validation = this.passwordService.validatePasswordStrength(dto.newPassword);
+    const validation = this.passwordService.validatePasswordStrength(
+      dto.newPassword,
+    );
     if (!validation.valid) {
       throw new BadRequestException(validation.errors.join(', '));
     }
 
     // Update password
-    await this.employeesService.updatePassword(employeeId, dto.newPassword, tenantDataSource);
+    await this.employeesService.updatePassword(
+      employeeId,
+      dto.newPassword,
+      tenantDataSource,
+    );
 
     this.logger.log(`Password changed successfully for employee ${employeeId}`);
 

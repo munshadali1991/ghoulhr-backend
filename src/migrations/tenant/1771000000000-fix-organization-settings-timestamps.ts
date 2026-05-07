@@ -1,6 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class FixOrganizationSettingsTimestamps1771000000000 implements MigrationInterface {
+export class FixOrganizationSettingsTimestamps1771000000000
+  implements MigrationInterface
+{
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Check if snake_case columns exist before renaming
     const columnsResult = await queryRunner.query(`
@@ -19,14 +21,14 @@ export class FixOrganizationSettingsTimestamps1771000000000 implements Migration
         RENAME COLUMN created_at TO "createdAt"
       `);
     }
-    
+
     if (existingColumns.includes('updated_at')) {
       await queryRunner.query(`
         ALTER TABLE organization_settings 
         RENAME COLUMN updated_at TO "updatedAt"
       `);
     }
-    
+
     if (existingColumns.includes('deleted_at')) {
       await queryRunner.query(`
         ALTER TABLE organization_settings 
@@ -41,12 +43,12 @@ export class FixOrganizationSettingsTimestamps1771000000000 implements Migration
       ALTER TABLE organization_settings 
       RENAME COLUMN "createdAt" TO created_at
     `);
-    
+
     await queryRunner.query(`
       ALTER TABLE organization_settings 
       RENAME COLUMN "updatedAt" TO updated_at
     `);
-    
+
     await queryRunner.query(`
       ALTER TABLE organization_settings 
       RENAME COLUMN "deletedAt" TO deleted_at

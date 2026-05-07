@@ -35,7 +35,9 @@ export class AuthController {
   ) {}
 
   @Get('session')
-  @ApiOperation({ summary: 'Current session from access cookie (or Bearer for tooling)' })
+  @ApiOperation({
+    summary: 'Current session from access cookie (or Bearer for tooling)',
+  })
   @ApiResponse({ status: 200, description: 'Authenticated user profile' })
   @ApiResponse({ status: 401, description: 'Missing or invalid access token' })
   getSession(@Req() req: Request) {
@@ -51,7 +53,10 @@ export class AuthController {
   @ApiOperation({ summary: 'Rotate refresh cookie and re-issue access cookie' })
   @ApiResponse({ status: 200, description: 'Cookies updated' })
   @ApiResponse({ status: 401, description: 'Invalid refresh session' })
-  async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+  async refresh(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     return this.authRefreshService.refresh(req, res);
   }
 
@@ -73,7 +78,10 @@ export class AuthController {
   @ApiResponse({ status: 201, type: AuthResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid payload or organization' })
   @ApiResponse({ status: 403, description: 'Role assignment forbidden' })
-  @ApiResponse({ status: 409, description: 'User already exists in organization' })
+  @ApiResponse({
+    status: 409,
+    description: 'User already exists in organization',
+  })
   async register(
     @Body() dto: RegisterDto,
     @Req() req: Request,
@@ -81,7 +89,11 @@ export class AuthController {
     @Headers('x-bootstrap-admin-key') bootstrapAdminKey?: string,
   ) {
     const result = await this.authService.register(dto, req, bootstrapAdminKey);
-    this.authCookieService.attachAuthCookies(res, result.accessToken, result.refreshPlain);
+    this.authCookieService.attachAuthCookies(
+      res,
+      result.accessToken,
+      result.refreshPlain,
+    );
     return { user: result.user };
   }
 
@@ -97,7 +109,11 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.authService.login(dto, req);
-    this.authCookieService.attachAuthCookies(res, result.accessToken, result.refreshPlain);
+    this.authCookieService.attachAuthCookies(
+      res,
+      result.accessToken,
+      result.refreshPlain,
+    );
     return { user: result.user };
   }
 
@@ -117,8 +133,15 @@ export class AuthController {
     @Headers('x-bootstrap-admin-key') bootstrapAdminKey: string,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.authService.bootstrapSuperAdmin(dto, bootstrapAdminKey);
-    this.authCookieService.attachAuthCookies(res, result.accessToken, result.refreshPlain);
+    const result = await this.authService.bootstrapSuperAdmin(
+      dto,
+      bootstrapAdminKey,
+    );
+    this.authCookieService.attachAuthCookies(
+      res,
+      result.accessToken,
+      result.refreshPlain,
+    );
     return { user: result.user };
   }
 

@@ -1,14 +1,16 @@
-import { MigrationInterface, QueryRunner } from "typeorm";
+import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class CreateEmployeesTable1769000000001 implements MigrationInterface {
-    name = 'CreateEmployeesTable1769000000001'
+  name = 'CreateEmployeesTable1769000000001';
 
-    public async up(queryRunner: QueryRunner): Promise<void> {
-        // Create enum for employee role
-        await queryRunner.query(`CREATE TYPE "public"."employees_role_enum" AS ENUM('ADMIN', 'EMPLOYEE', 'MANAGER', 'HR')`);
-        
-        // Create employees table
-        await queryRunner.query(`
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    // Create enum for employee role
+    await queryRunner.query(
+      `CREATE TYPE "public"."employees_role_enum" AS ENUM('ADMIN', 'EMPLOYEE', 'MANAGER', 'HR')`,
+    );
+
+    // Create employees table
+    await queryRunner.query(`
             CREATE TABLE "employees" (
                 "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
                 "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
@@ -38,21 +40,25 @@ export class CreateEmployeesTable1769000000001 implements MigrationInterface {
                 CONSTRAINT "PK_employees_id" PRIMARY KEY ("id")
             )
         `);
-        
-        // Create indexes
-        await queryRunner.query(`CREATE INDEX "IDX_employees_globalUserId" ON "employees" ("globalUserId")`);
-        await queryRunner.query(`CREATE INDEX "IDX_employees_email" ON "employees" ("email")`);
-    }
 
-    public async down(queryRunner: QueryRunner): Promise<void> {
-        // Drop indexes
-        await queryRunner.query(`DROP INDEX "IDX_employees_email"`);
-        await queryRunner.query(`DROP INDEX "IDX_employees_globalUserId"`);
-        
-        // Drop table
-        await queryRunner.query(`DROP TABLE "employees"`);
-        
-        // Drop enum
-        await queryRunner.query(`DROP TYPE "public"."employees_role_enum"`);
-    }
+    // Create indexes
+    await queryRunner.query(
+      `CREATE INDEX "IDX_employees_globalUserId" ON "employees" ("globalUserId")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_employees_email" ON "employees" ("email")`,
+    );
+  }
+
+  public async down(queryRunner: QueryRunner): Promise<void> {
+    // Drop indexes
+    await queryRunner.query(`DROP INDEX "IDX_employees_email"`);
+    await queryRunner.query(`DROP INDEX "IDX_employees_globalUserId"`);
+
+    // Drop table
+    await queryRunner.query(`DROP TABLE "employees"`);
+
+    // Drop enum
+    await queryRunner.query(`DROP TYPE "public"."employees_role_enum"`);
+  }
 }

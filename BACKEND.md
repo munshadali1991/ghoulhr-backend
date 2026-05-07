@@ -3,14 +3,14 @@
 ## Overview
 
 The backend is a NestJS 11 multi-tenant HR API with:
-- master-level organization and global user management
-- tenant-scoped employee + settings modules
-- cookie-based authentication with rotating refresh sessions
-- organization runtime bootstrap (tenant DB setup + migrations)
+- master-level organization and user management
+- tenant-scoped employee and settings modules
+- cookie-first authentication with rotating refresh sessions
+- runtime tenant bootstrap (tenant DB provisioning + migrations)
 
 ## Stack
 
-- NestJS 11 + TypeScript 
+- NestJS 11 + TypeScript
 - TypeORM + PostgreSQL
 - class-validator + class-transformer
 - Swagger (`/api-docs`)
@@ -25,9 +25,10 @@ Current runtime behavior:
 - enables JSON/urlencoded body limits (default `100mb`, env: `JSON_BODY_LIMIT`)
 - enables CORS with:
   - explicit allowlist from `WEB_APP_ORIGINS` (comma-separated), or
-  - localhost / subdomain localhost fallback checks
+  - localhost / subdomain-localhost fallback checks
 - applies global `ValidationPipe` (`whitelist`, `forbidNonWhitelisted`, `transform`)
 - serves Swagger at `/api-docs`
+- conditionally enables trust proxy via `TRUST_PROXY` or production `NODE_ENV`
 
 App root wiring: `src/app.module.ts`
 - imports:
@@ -40,21 +41,22 @@ App root wiring: `src/app.module.ts`
   - `SettingsModule`
 - applies `TenantResolverMiddleware` globally
 
-## Authentication (Current)
+## Authentication
 
 ### Model
 
-The backend now uses **HttpOnly cookies** for auth in production app flows:
+The backend uses HttpOnly cookies for auth flows:
 - access cookie (default `ghoulhr_access`)
 - refresh cookie (default `ghoulhr_refresh`)
 
-Bearer tokens are still accepted as a tooling fallback in guards and session lookup.
+Bearer tokens are also accepted as a tooling fallback in guards.
 
 ### Token + Session Components
 
 - `src/auth/auth.service.ts`
   - custom HS256 token mint/verify (`createHmac`)
   - access token TTL from `JWT_ACCESS_EXPIRES_IN` or `JWT_EXPIRES_IN`
+  - tenant-aware register/login resolution
 - `src/auth/auth-cookie.service.ts`
   - attaches/clears auth cookies
   - cookie behavior configurable via:
@@ -63,11 +65,13 @@ Bearer tokens are still accepted as a tooling fallback in guards and session loo
     - cookie-name envs
 - `src/auth/entities/refresh-session.entity.ts`
   - persistent refresh session table (`refresh_sessions`)
-  - supports session kinds: `master` and `employee`
+  - session kinds include `master` and `employee`
 - `src/auth/refresh-session.service.ts`
   - issue / validate / rotate / revoke refresh sessions
 - `src/auth/auth-refresh.service.ts`
   - `/auth/refresh` and `/auth/logout` logic
+- `src/auth/super-admin-bootstrap.service.ts`
+  - auto-calls `ensureDefaultSuperAdmin()` during application bootstrap
 
 ### Auth Endpoints
 
@@ -75,9 +79,9 @@ From `src/auth/auth.controller.ts`:
 - `GET /auth/session` -> resolves current user from access token
 - `POST /auth/refresh` -> rotates refresh session + reissues access cookie
 - `POST /auth/logout` -> revokes refresh + clears cookies
-- `POST /auth/register` -> register in master users table
-- `POST /auth/login` -> login via master users flow
-- `POST /auth/superadmin/bootstrap` -> initial super-admin bootstrap
+- `POST /auth/register` -> tenant-aware register into users table
+- `POST /auth/login` -> login (tenant-first lookup with super-admin fallback)
+- `POST /auth/superadmin/bootstrap` -> bootstrap super-admin using bootstrap key
 
 From `src/auth/tenant-auth.controller.ts`:
 - `POST /auth/employee/login` -> employee login (tenant-aware)
@@ -89,8 +93,7 @@ From `src/auth/tenant-auth.controller.ts`:
   - reads access token from cookie or Bearer
   - validates and sets `req.user`
 - `TenantAuthGuard` (`src/auth/guards/tenant-auth.guard.ts`)
-  - same token read/validate
-  - additionally enforces token subdomain == resolved tenant subdomain (when tenant context exists)
+  - token validation + tenant-subdomain consistency checks
 - `RolesGuard` (`src/auth/guards/roles.guard.ts`)
   - supports both platform `Role` and tenant `EmployeeRole`
 
@@ -110,7 +113,8 @@ Resolution flow:
 2. otherwise parse host/port
 3. if request port maps to `organization.orgPort`, bind that tenant
 4. otherwise parse subdomain and resolve organization by subdomain
-5. attach:
+5. skip root domain / localhost root and skip `API_SUBDOMAIN`
+6. attach:
    - `req.organization`
    - `req.tenantDataSource` from `TenantConnectionManager`
 
@@ -148,7 +152,7 @@ Key files:
   - drops created tenant DB
   - deletes master organization record
 - auto-provisions ORG_ADMIN user path when `adminEmail` exists
-- computes super admin dashboard aggregates (`totalOrganizations`, `totalUsers`, `totalRevenue`, growth)
+- computes super-admin dashboard aggregates
 - startup bootstrap (`OrganizationRuntimeBootstrapService`) runs:
   - `ensureAllOrganizationsRuntimeReady()`
 
@@ -178,7 +182,7 @@ All under `TenantAuthGuard + RolesGuard`:
   - stores docs payload encrypted (`inline_base64` driver)
   - writes audit row
 - duplicate checks for email and mobile
-- password reset / login attempt tracking / lockout logic hooks
+- password reset / login attempt tracking / lockout hooks
 - employee code generation from settings:
   - `employee.id_prefix`
   - `employee.auto_generate_id`
@@ -202,39 +206,40 @@ Key files:
 - `GET /settings/:key`
 - `POST /settings`
 
-Important: specific routes are intentionally defined before `:key`.
+Important: specific routes are defined before `:key`.
 
 ### Data model
 
-Settings use key-value JSON (`organization_settings` entity) and map between:
-- internal keys (e.g. `org.date_format`, `attendance.shifts`)
-- frontend-friendly object shapes (e.g. `dateFormat`, `working_days`)
+Settings use key-value JSON (`organization_settings`) and map between:
+- internal keys (for example `org.date_format`, `attendance.shifts`)
+- frontend-friendly object shapes (for example `dateFormat`, `working_days`)
 
 ## Core Database Infrastructure
 
-`src/core/database/*`
+`src/database/*` and `src/core/database/*`
 
+- `DatabaseModule`
+  - master TypeORM setup (`migrationsRun: true`)
 - `TenantConnectionManager`
   - tenant datasource creation/caching
   - create/drop tenant DB helpers
 - `MigrationRunnerService`
   - executes tenant migrations against datasource
 - `DatabaseCoreModule`
-  - exports both services
+  - exports tenant connection + migration services
 
 ## Security-Relevant Notes
 
 - Auth is cookie-first; access token may still be read from Bearer for tooling.
 - Refresh sessions are persisted and rotated.
-- Tenant isolation is enforced by:
-  - middleware tenant binding
-  - tenant guard subdomain checks
-- Sensitive onboarding fields can be encrypted at rest through `FieldEncryptionService`.
-- Bootstrap flow still relies on `BOOTSTRAP_ADMIN_KEY`.
+- Tenant isolation is enforced by middleware tenant binding and tenant-aware guards.
+- Sensitive onboarding fields can be encrypted at rest via `FieldEncryptionService`.
+- Super-admin bootstrap remains protected by `BOOTSTRAP_ADMIN_KEY` on bootstrap endpoint.
 
 ## Environment Variables (Active/Important)
 
 - DB: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS`, `DB_NAME`, `DB_LOGGING`
+- Server/platform: `PORT`, `NODE_ENV`, `TRUST_PROXY`, `JSON_BODY_LIMIT`, `WEB_APP_ORIGINS`
 - Auth:
   - `JWT_SECRET` (or fallback `AUTH_TOKEN_SECRET`)
   - `JWT_ACCESS_EXPIRES_IN` / `JWT_EXPIRES_IN`
@@ -245,32 +250,41 @@ Settings use key-value JSON (`organization_settings` entity) and map between:
   - `COOKIE_SAMESITE`
 - Bootstrap:
   - `BOOTSTRAP_ADMIN_KEY`
-  - defaults for initial org/super-admin identity
+  - `DEFAULT_SUPERADMIN_EMAIL`
+  - `DEFAULT_SUPERADMIN_PASSWORD`
+  - `DEFAULT_ORGANIZATION_NAME`
+  - `DEFAULT_ORGANIZATION_SUBDOMAIN`
 - Tenant/runtime:
   - `TENANT_CONNECTION_POOL_SIZE`
   - `TENANT_LOCK_SUBDOMAIN`
   - `ORG_PORT_START`
   - `API_SUBDOMAIN`
-- Platform/CORS:
-  - `WEB_APP_ORIGINS`
-  - `TRUST_PROXY`
-  - `JSON_BODY_LIMIT`
+- Security:
   - `FIELD_ENCRYPTION_KEY`
 
 ## Scripts
 
 From `backend/ghoulhr-backend/package.json`:
-- `npm run start:dev`
 - `npm run build`
+- `npm run format`
+- `npm run start`
+- `npm run start:dev`
+- `npm run start:debug`
 - `npm run start:prod`
 - `npm run lint`
 - `npm run test`
+- `npm run test:watch`
+- `npm run test:cov`
+- `npm run test:debug`
 - `npm run test:e2e`
 - `npm run proxy:start`
+- `npm run pm2:start:base`
+- `npm run pm2:sync:orgs`
+- `npm run pm2:save`
 - `npm run tenant:migrate`
 
 ## Current-State Notes
 
-- `org-admin` dedicated backend module is not the main active path for current frontend behavior; org admin capabilities currently run mostly through employee/settings flows.
-- Swagger bearer auth is documented as optional for tooling; production web app path uses cookies.
-- `AuthService.ensureDefaultSuperAdmin()` exists but startup logic currently relies on explicit bootstrap/runtime flows rather than automatically calling this from `main.ts`.
+- Swagger bearer auth is documented as optional for tooling; production app flows use cookies.
+- `AuthService.ensureDefaultSuperAdmin()` is auto-invoked during app bootstrap through `SuperAdminBootstrapService`.
+- Current health check endpoint is `GET /` (`AppController`); `/health` is currently only in tenant-middleware excluded paths.

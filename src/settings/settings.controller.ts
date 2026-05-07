@@ -1,7 +1,20 @@
-import { Controller, Get, Post, Body, Param, UseGuards, Req } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  UseGuards,
+  Req,
+} from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { SettingsService } from './settings.service';
-import { CreateSettingDto, UpdateOrgProfileDto, UpdateEmployeeSettingsDto, UpdateAttendanceSettingsDto } from './dto/create-setting.dto';
+import {
+  CreateSettingDto,
+  UpdateOrgProfileDto,
+  UpdateEmployeeSettingsDto,
+  UpdateAttendanceSettingsDto,
+} from './dto/create-setting.dto';
 import { TenantAuthGuard } from '../auth/guards/tenant-auth.guard';
 import type { TenantRequest } from '../common/middleware/tenant-resolver.middleware';
 
@@ -13,7 +26,7 @@ export class SettingsController {
   constructor(private readonly settingsService: SettingsService) {}
 
   // Specific routes MUST come before parameterized routes (:key)
-  
+
   @Get('profile')
   @ApiOperation({ summary: 'Get organization profile settings' })
   async getOrgProfile(@Req() req: TenantRequest) {
@@ -22,8 +35,14 @@ export class SettingsController {
 
   @Post('profile')
   @ApiOperation({ summary: 'Update organization profile settings' })
-  async updateOrgProfile(@Req() req: TenantRequest, @Body() dto: UpdateOrgProfileDto) {
-    const updates = await this.settingsService.updateOrgProfile(dto, req.tenantDataSource);
+  async updateOrgProfile(
+    @Req() req: TenantRequest,
+    @Body() dto: UpdateOrgProfileDto,
+  ) {
+    const updates = await this.settingsService.updateOrgProfile(
+      dto,
+      req.tenantDataSource,
+    );
     return { message: 'Profile updated successfully', updates };
   }
 
@@ -35,8 +54,14 @@ export class SettingsController {
 
   @Post('employee')
   @ApiOperation({ summary: 'Update employee settings (bulk update)' })
-  async updateEmployeeSettings(@Req() req: TenantRequest, @Body() dto: UpdateEmployeeSettingsDto) {
-    const updates = await this.settingsService.updateEmployeeSettings(dto, req.tenantDataSource);
+  async updateEmployeeSettings(
+    @Req() req: TenantRequest,
+    @Body() dto: UpdateEmployeeSettingsDto,
+  ) {
+    const updates = await this.settingsService.updateEmployeeSettings(
+      dto,
+      req.tenantDataSource,
+    );
     return { message: 'Employee settings updated successfully', updates };
   }
 
@@ -48,13 +73,19 @@ export class SettingsController {
 
   @Post('attendance')
   @ApiOperation({ summary: 'Update attendance settings (bulk update)' })
-  async updateAttendanceSettings(@Req() req: TenantRequest, @Body() dto: UpdateAttendanceSettingsDto) {
-    const updates = await this.settingsService.updateAttendanceSettings(dto, req.tenantDataSource);
+  async updateAttendanceSettings(
+    @Req() req: TenantRequest,
+    @Body() dto: UpdateAttendanceSettingsDto,
+  ) {
+    const updates = await this.settingsService.updateAttendanceSettings(
+      dto,
+      req.tenantDataSource,
+    );
     return { message: 'Attendance settings updated successfully', updates };
   }
 
   // General routes (come after specific routes)
-  
+
   @Get()
   @ApiOperation({ summary: 'Get all settings for organization' })
   async getAllSettings(@Req() req: TenantRequest) {
@@ -70,6 +101,10 @@ export class SettingsController {
   @Post()
   @ApiOperation({ summary: 'Create or update a setting' })
   async setSetting(@Req() req: TenantRequest, @Body() dto: CreateSettingDto) {
-    return this.settingsService.setSetting(dto.key, dto.value, req.tenantDataSource);
+    return this.settingsService.setSetting(
+      dto.key,
+      dto.value,
+      req.tenantDataSource,
+    );
   }
 }

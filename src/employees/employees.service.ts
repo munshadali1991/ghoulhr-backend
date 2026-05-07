@@ -1,4 +1,9 @@
-import { Injectable, ConflictException, Logger, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  Logger,
+  BadRequestException,
+} from '@nestjs/common';
 import { DataSource, QueryFailedError, Repository } from 'typeorm';
 import { Employee, EmployeeRole, EmployeeStatus } from './employee.entity';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
@@ -6,6 +11,7 @@ import {
   CheckEmployeeDuplicateDto,
   EmployeeOnboardingCreateDto,
 } from './dto/employee-onboarding.dto';
+import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { PasswordService } from '../common/services/password.service';
 import { FieldEncryptionService } from '../common/services/field-encryption.service';
 import { SettingsService } from '../settings/settings.service';
@@ -16,6 +22,20 @@ import { EmployeeDocument } from './entities/employee-document.entity';
 import { EmployeeAccessControl } from './entities/employee-access.entity';
 import { EmployeeAuditLog } from './entities/employee-audit-log.entity';
 import { EmployeeEmergencyContact } from './entities/employee-emergency-contact.entity';
+
+interface EmployeeDepartmentSetting {
+  id: string;
+  name: string;
+  code?: string;
+  isActive: boolean;
+}
+
+interface EmployeeDesignationSetting {
+  id: string;
+  name: string;
+  departmentIds: string[];
+  isActive: boolean;
+}
 
 export interface CreateEmployeeResult {
   employee: Employee;
@@ -49,11 +69,20 @@ export class EmployeesService {
     }
 
     // Step 2: Fetch employee settings
-    const employeeSettings = await this.settingsService.getEmployeeSettings(dataSource);
-    this.logger.log(`Employee settings loaded: ${JSON.stringify(employeeSettings)}`);
+    const employeeSettings =
+      await this.settingsService.getEmployeeSettings(dataSource);
+    this.logger.log(
+      `Employee settings loaded: ${JSON.stringify(employeeSettings)}`,
+    );
 
     // Step 3: Validate required fields from settings
     await this.validateRequiredFields(dto, employeeSettings);
+    this.validateDepartmentAndDesignation(
+      dto.department,
+      dto.designation,
+      employeeSettings.departments,
+      employeeSettings.designations,
+    );
 
     // Step 4: Check email uniqueness
     const email = dto.email.toLowerCase().trim();
@@ -73,7 +102,8 @@ export class EmployeesService {
 
     // Step 5: Generate temporary password
     const temporaryPassword = this.passwordService.generateTemporaryPassword();
-    const hashedPassword = await this.passwordService.hashPassword(temporaryPassword);
+    const hashedPassword =
+      await this.passwordService.hashPassword(temporaryPassword);
     const passwordExpiresAt = this.passwordService.getTempPasswordExpiry();
 
     // Step 6: Calculate probation end date if settings exist
@@ -137,8 +167,12 @@ export class EmployeesService {
       const count = await repo
         .createQueryBuilder('e')
         .where('LOWER(e.email) IN (:...emails)', { emails })
-        .orWhere('LOWER(COALESCE(e.personalEmail, \'\')) IN (:...emails)', { emails })
-        .orWhere('LOWER(COALESCE(e.officialEmail, \'\')) IN (:...emails)', { emails })
+        .orWhere("LOWER(COALESCE(e.personalEmail, '')) IN (:...emails)", {
+          emails,
+        })
+        .orWhere("LOWER(COALESCE(e.officialEmail, '')) IN (:...emails)", {
+          emails,
+        })
         .getCount();
       emailTaken = count > 0;
     }
@@ -164,19 +198,38 @@ export class EmployeesService {
     actorId: string,
   ): Promise<CreateEmployeeResult> {
     const actorUuid = this.requireActorUuid(actorId);
-    const { basic, employment, payroll, bank, compliance, emergencyContact, documents, access } = dto;
-    const loginEmail = (basic.officialEmail?.trim() || basic.personalEmail.trim()).toLowerCase();
+    const {
+      basic,
+      employment,
+      experience,
+      payroll,
+      bank,
+      compliance,
+      emergencyContact,
+      documents,
+      access,
+    } = dto;
+    const loginEmail = (
+      basic.officialEmail?.trim() || basic.personalEmail.trim()
+    ).toLowerCase();
     const personalEmail = basic.personalEmail.toLowerCase().trim();
-    const officialEmail = basic.officialEmail?.trim().toLowerCase() || undefined;
+    const officialEmail =
+      basic.officialEmail?.trim().toLowerCase() || undefined;
 
     const repo = dataSource.getRepository(Employee);
     const existing = await repo.findOne({ where: { email: loginEmail } });
     if (existing) {
-      throw new ConflictException('Employee already exists with this login email');
+      throw new ConflictException(
+        'Employee already exists with this login email',
+      );
     }
 
-    const employeeSettings = await this.settingsService.getEmployeeSettings(dataSource);
-    const fullName = [basic.firstName, basic.middleName, basic.lastName].filter(Boolean).join(' ').trim();
+    const employeeSettings =
+      await this.settingsService.getEmployeeSettings(dataSource);
+    const fullName = [basic.firstName, basic.middleName, basic.lastName]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
 
     await this.validateRequiredFields(
       {
@@ -189,13 +242,21 @@ export class EmployeesService {
       } as CreateEmployeeDto,
       employeeSettings,
     );
+    this.validateDepartmentAndDesignation(
+      employment.department,
+      employment.designation,
+      employeeSettings.departments,
+      employeeSettings.designations,
+    );
 
     if (
       bank?.accountNumber &&
       bank?.confirmAccountNumber &&
       bank.accountNumber.trim() !== bank.confirmAccountNumber.trim()
     ) {
-      throw new BadRequestException('Account number confirmation does not match');
+      throw new BadRequestException(
+        'Account number confirmation does not match',
+      );
     }
 
     const ecName = emergencyContact?.contactName?.trim() ?? '';
@@ -209,10 +270,15 @@ export class EmployeesService {
       );
     }
 
-    const employeeCode = await this.generateEmployeeCode(repo, employeeSettings);
+    const employeeCode = await this.generateEmployeeCode(
+      repo,
+      employeeSettings,
+    );
     const temporaryPassword =
-      access.temporaryPassword?.trim() || this.passwordService.generateTemporaryPassword();
-    const hashedPassword = await this.passwordService.hashPassword(temporaryPassword);
+      access.temporaryPassword?.trim() ||
+      this.passwordService.generateTemporaryPassword();
+    const hashedPassword =
+      await this.passwordService.hashPassword(temporaryPassword);
     const passwordExpiresAt = this.passwordService.getTempPasswordExpiry();
     const role = this.mapPortalRoleToEmployeeRole(access.portalRoleLabel);
 
@@ -230,166 +296,197 @@ export class EmployeesService {
       ? this.fieldEncryption.encrypt(compliance.panNumber.toUpperCase().trim())
       : null;
     const aadhaarEnc = compliance?.aadhaarNumber?.trim()
-      ? this.fieldEncryption.encrypt(compliance.aadhaarNumber.replace(/\s/g, ''))
+      ? this.fieldEncryption.encrypt(
+          compliance.aadhaarNumber.replace(/\s/g, ''),
+        )
       : null;
 
     let savedEmployee: Employee;
     try {
       savedEmployee = await dataSource.transaction(async (em) => {
-      const empRepo = em.getRepository(Employee);
-      const emp = empRepo.create({
-        employeeCode,
-        name: fullName,
-        email: loginEmail,
-        password: hashedPassword,
-        role,
-        status: EmployeeStatus.PENDING_ACTIVATION,
-        department: employment.department,
-        designation: employment.designation,
-        phoneNumber: basic.mobileNumber,
-        dateOfBirth: basic.dateOfBirth,
-        dateOfJoining: employment.dateOfJoining,
-        probationEndDate,
-        firstName: basic.firstName,
-        middleName: basic.middleName,
-        lastName: basic.lastName,
-        gender: basic.gender,
-        personalEmail,
-        officialEmail,
-        alternateMobile: basic.alternateMobile,
-        profilePhotoUrl: basic.profilePhotoUrl,
-        panNumberEnc: panEnc,
-        aadhaarNumberEnc: aadhaarEnc,
-        passportNumber: compliance?.passportNumber,
-        passportExpiry: compliance?.passportExpiry,
-        uanNumber: compliance?.uanNumber,
-        esiNumber: compliance?.esicNumber,
-        pfNumber: compliance?.pfNumber,
-        mustChangePassword: true,
-        createdBy: actorUuid,
-      });
-      const saved = await empRepo.save(emp);
+        const empRepo = em.getRepository(Employee);
+        const emp = empRepo.create({
+          employeeCode,
+          name: fullName,
+          email: loginEmail,
+          password: hashedPassword,
+          role,
+          status: EmployeeStatus.PENDING_ACTIVATION,
+          department: employment.department,
+          designation: employment.designation,
+          phoneNumber: basic.mobileNumber,
+          dateOfBirth: basic.dateOfBirth,
+          dateOfJoining: employment.dateOfJoining,
+          probationEndDate,
+          firstName: basic.firstName,
+          middleName: basic.middleName,
+          lastName: basic.lastName,
+          gender: basic.gender,
+          personalEmail,
+          officialEmail,
+          alternateMobile: basic.alternateMobile,
+          profilePhotoUrl: basic.profilePhotoUrl,
+          panNumberEnc: panEnc,
+          aadhaarNumberEnc: aadhaarEnc,
+          passportNumber: compliance?.passportNumber,
+          passportExpiry: compliance?.passportExpiry,
+          uanNumber: compliance?.uanNumber,
+          esiNumber: compliance?.esicNumber,
+          pfNumber: compliance?.pfNumber,
+          mustChangePassword: true,
+          createdBy: actorUuid,
+        });
+        const saved = await empRepo.save(emp);
 
-      await em.getRepository(EmployeeEmploymentDetail).save(
-        em.getRepository(EmployeeEmploymentDetail).create({
-          employee: saved,
-          employmentType: employment.employmentType,
-          employmentStatus: employment.employmentStatus,
-          reportingManagerId: this.optionalUuidField(
-            employment.reportingManagerId,
-            'Reporting manager',
-          ),
-          hrManagerId: this.optionalUuidField(employment.hrManagerId, 'HR manager'),
-          workLocation: employment.workLocation,
-          workMode: employment.workMode,
-          shift: employment.shift,
-          probationPeriodDays: employment.probationPeriodDays,
-          noticePeriodDays: employment.noticePeriodDays,
-          businessUnit: employment.businessUnit,
-          team: employment.team,
-          gradeBand: employment.gradeBand,
-          costCenter: employment.costCenter,
-        }),
-      );
-
-      if (payroll && (payroll.ctc != null || payroll.basicSalary != null || payroll.salaryStructure)) {
-        await em.getRepository(EmployeeSalaryDetail).save(
-          em.getRepository(EmployeeSalaryDetail).create({
+        await em.getRepository(EmployeeEmploymentDetail).save(
+          em.getRepository(EmployeeEmploymentDetail).create({
             employee: saved,
-            ctc: payroll.ctc != null ? String(payroll.ctc) : undefined,
-            salaryStructure: payroll.salaryStructure,
-            basicSalary: payroll.basicSalary != null ? String(payroll.basicSalary) : undefined,
-            hra: payroll.hra != null ? String(payroll.hra) : undefined,
-            allowancesJson: payroll.allowances,
-            pfApplicable: payroll.pfApplicable ?? true,
-            esicApplicable: payroll.esicApplicable ?? false,
-            taxRegime: payroll.taxRegime,
+            employmentType: employment.employmentType,
+            employmentStatus: employment.employmentStatus,
+            reportingManagerId: this.optionalUuidField(
+              employment.reportingManagerId,
+              'Reporting manager',
+            ),
+            hrManagerId: this.optionalUuidField(
+              employment.hrManagerId,
+              'HR manager',
+            ),
+            workLocation: employment.workLocation,
+            workMode: employment.workMode,
+            shift: employment.shift,
+            probationPeriodDays: employment.probationPeriodDays,
+            noticePeriodDays: employment.noticePeriodDays,
+            businessUnit: employment.businessUnit,
+            team: employment.team,
+            gradeBand: employment.gradeBand,
+            costCenter: employment.costCenter,
+            previousCompanyName: experience?.previousCompanyName?.trim(),
+            previousDesignation: experience?.previousDesignation?.trim(),
+            totalExperienceYears:
+              experience?.totalExperienceYears != null
+                ? String(experience.totalExperienceYears)
+                : undefined,
+            lastDrawnCtc:
+              experience?.lastDrawnCtc != null
+                ? String(experience.lastDrawnCtc)
+                : undefined,
+            experienceSummary: experience?.experienceSummary?.trim(),
           }),
         );
-      }
 
-      if (bank && (bank.accountNumber || bank.bankName)) {
-        const accEnc = bank.accountNumber?.trim()
-          ? this.fieldEncryption.encrypt(bank.accountNumber.trim())
-          : null;
-        await em.getRepository(EmployeeBankDetail).save(
-          em.getRepository(EmployeeBankDetail).create({
-            employee: saved,
-            accountHolderName: bank.accountHolderName,
-            bankName: bank.bankName,
-            accountNumberEnc: accEnc,
-            accountLastFour: bank.accountNumber
-              ? this.fieldEncryption.lastFour(bank.accountNumber)
-              : null,
-            ifscCode: bank.ifscCode,
-            branchName: bank.branchName,
-            verificationStatus: bank.verificationStatus || 'PENDING',
-          }),
-        );
-      }
-
-      if (ecAll) {
-        await em.getRepository(EmployeeEmergencyContact).save(
-          em.getRepository(EmployeeEmergencyContact).create({
-            employee: saved,
-            contactName: ecName,
-            contactPhone: ecPhone,
-            relationship: ecRel,
-          }),
-        );
-      }
-
-      if (documents?.length) {
-        const docRepo = em.getRepository(EmployeeDocument);
-        for (const d of documents.slice(0, 20)) {
-          if (!d.dataBase64) continue;
-          const approxBytes = Math.floor((d.dataBase64.length * 3) / 4);
-          if (approxBytes > 5 * 1024 * 1024) {
-            throw new BadRequestException(`Document ${d.fileName} exceeds size limit`);
-          }
-          await docRepo.save(
-            docRepo.create({
+        if (
+          payroll &&
+          (payroll.ctc != null ||
+            payroll.basicSalary != null ||
+            payroll.salaryStructure)
+        ) {
+          await em.getRepository(EmployeeSalaryDetail).save(
+            em.getRepository(EmployeeSalaryDetail).create({
               employee: saved,
-              documentType: d.documentType,
-              fileName: d.fileName,
-              mimeType: d.mimeType,
-              sizeBytes: d.sizeBytes,
-              storageDriver: 'inline_base64',
-              payloadEnc: this.fieldEncryption.encrypt(d.dataBase64),
-              uploadedBy: actorUuid,
-              verificationStatus: 'PENDING',
+              ctc: payroll.ctc != null ? String(payroll.ctc) : undefined,
+              salaryStructure: payroll.salaryStructure,
+              basicSalary:
+                payroll.basicSalary != null
+                  ? String(payroll.basicSalary)
+                  : undefined,
+              hra: payroll.hra != null ? String(payroll.hra) : undefined,
+              allowancesJson: payroll.allowances,
+              pfApplicable: payroll.pfApplicable ?? true,
+              esicApplicable: payroll.esicApplicable ?? false,
+              taxRegime: payroll.taxRegime,
             }),
           );
         }
-      }
 
-      await em.getRepository(EmployeeAccessControl).save(
-        em.getRepository(EmployeeAccessControl).create({
-          employee: saved,
-          hrmsAccessEnabled: access.hrmsAccessEnabled ?? true,
-          welcomeEmailEnabled: access.welcomeEmailEnabled ?? false,
-          mfaEnabled: access.mfaEnabled ?? false,
-          portalRoleLabel: access.portalRoleLabel,
-        }),
-      );
+        if (bank && (bank.accountNumber || bank.bankName)) {
+          const accEnc = bank.accountNumber?.trim()
+            ? this.fieldEncryption.encrypt(bank.accountNumber.trim())
+            : null;
+          await em.getRepository(EmployeeBankDetail).save(
+            em.getRepository(EmployeeBankDetail).create({
+              employee: saved,
+              accountHolderName: bank.accountHolderName,
+              bankName: bank.bankName,
+              accountNumberEnc: accEnc,
+              accountLastFour: bank.accountNumber
+                ? this.fieldEncryption.lastFour(bank.accountNumber)
+                : null,
+              ifscCode: bank.ifscCode,
+              branchName: bank.branchName,
+              verificationStatus: bank.verificationStatus || 'PENDING',
+            }),
+          );
+        }
 
-      await em.getRepository(EmployeeAuditLog).save(
-        em.getRepository(EmployeeAuditLog).create({
-          employee: saved,
-          actorId: actorUuid,
-          action: 'HR_ONBOARDING_CREATE',
-          metadata: { employeeCode: saved.employeeCode, email: saved.email },
-        }),
-      );
+        if (ecAll) {
+          await em.getRepository(EmployeeEmergencyContact).save(
+            em.getRepository(EmployeeEmergencyContact).create({
+              employee: saved,
+              contactName: ecName,
+              contactPhone: ecPhone,
+              relationship: ecRel,
+            }),
+          );
+        }
 
-      return saved;
-    });
+        if (documents?.length) {
+          const docRepo = em.getRepository(EmployeeDocument);
+          for (const d of documents.slice(0, 20)) {
+            if (!d.dataBase64) continue;
+            const approxBytes = Math.floor((d.dataBase64.length * 3) / 4);
+            if (approxBytes > 5 * 1024 * 1024) {
+              throw new BadRequestException(
+                `Document ${d.fileName} exceeds size limit`,
+              );
+            }
+            await docRepo.save(
+              docRepo.create({
+                employee: saved,
+                documentType: d.documentType,
+                fileName: d.fileName,
+                mimeType: d.mimeType,
+                sizeBytes: d.sizeBytes,
+                storageDriver: 'inline_base64',
+                payloadEnc: this.fieldEncryption.encrypt(d.dataBase64),
+                uploadedBy: actorUuid,
+                verificationStatus: 'PENDING',
+              }),
+            );
+          }
+        }
+
+        await em.getRepository(EmployeeAccessControl).save(
+          em.getRepository(EmployeeAccessControl).create({
+            employee: saved,
+            hrmsAccessEnabled: access.hrmsAccessEnabled ?? true,
+            welcomeEmailEnabled: access.welcomeEmailEnabled ?? false,
+            mfaEnabled: access.mfaEnabled ?? false,
+            portalRoleLabel: access.portalRoleLabel,
+          }),
+        );
+
+        await em.getRepository(EmployeeAuditLog).save(
+          em.getRepository(EmployeeAuditLog).create({
+            employee: saved,
+            actorId: actorUuid,
+            action: 'HR_ONBOARDING_CREATE',
+            metadata: { employeeCode: saved.employeeCode, email: saved.email },
+          }),
+        );
+
+        return saved;
+      });
     } catch (err) {
-      if (err instanceof BadRequestException || err instanceof ConflictException) {
+      if (
+        err instanceof BadRequestException ||
+        err instanceof ConflictException
+      ) {
         throw err;
       }
       if (err instanceof QueryFailedError) {
-        const driver = err.driverError as { code?: string; message?: string } | undefined;
+        const driver = err.driverError as
+          | { code?: string; message?: string }
+          | undefined;
         const code = driver?.code;
         const msg = (driver?.message || err.message || '').toString();
         this.logger.error(`HR onboarding failed: ${msg}`);
@@ -398,7 +495,10 @@ export class EmployeesService {
             'Tenant database is missing onboarding tables. Run tenant migrations for this organization (employee onboarding module), then retry.',
           );
         }
-        if (code === '22P02' || msg.includes('invalid input syntax for type uuid')) {
+        if (
+          code === '22P02' ||
+          msg.includes('invalid input syntax for type uuid')
+        ) {
           throw new BadRequestException(
             'A value was rejected as an invalid UUID (often an empty manager id or session id). Clear manager fields or sign in again.',
           );
@@ -407,7 +507,9 @@ export class EmployeesService {
       throw err;
     }
 
-    this.logger.log(`HR onboarding created: ${savedEmployee.employeeCode} (${savedEmployee.email})`);
+    this.logger.log(
+      `HR onboarding created: ${savedEmployee.employeeCode} (${savedEmployee.email})`,
+    );
 
     return {
       employee: savedEmployee,
@@ -416,10 +518,222 @@ export class EmployeesService {
     };
   }
 
+  async updateHrOnboarding(
+    employeeId: string,
+    dto: EmployeeOnboardingCreateDto,
+    dataSource: DataSource,
+    actorId: string,
+  ): Promise<Employee> {
+    const actorUuid = this.requireActorUuid(actorId);
+    const employeeRepo = dataSource.getRepository(Employee);
+    const existingEmployee = await employeeRepo.findOne({ where: { id: employeeId } });
+    if (!existingEmployee) {
+      throw new BadRequestException('Employee not found');
+    }
+
+    const {
+      basic,
+      employment,
+      experience,
+      payroll,
+      bank,
+      compliance,
+      emergencyContact,
+      access,
+    } = dto;
+
+    const loginEmail = (
+      basic.officialEmail?.trim() ||
+      basic.personalEmail?.trim() ||
+      existingEmployee.email
+    ).toLowerCase();
+    const otherEmployeeWithEmail = await employeeRepo.findOne({ where: { email: loginEmail } });
+    if (otherEmployeeWithEmail && otherEmployeeWithEmail.id !== employeeId) {
+      throw new ConflictException('Another employee already uses this login email');
+    }
+
+    const role = this.mapPortalRoleToEmployeeRole(access.portalRoleLabel || 'EMPLOYEE');
+    const personalEmail = (
+      basic.personalEmail?.trim() ||
+      existingEmployee.personalEmail ||
+      existingEmployee.email
+    )
+      .toLowerCase()
+      .trim();
+    const officialEmail = basic.officialEmail?.trim().toLowerCase() || undefined;
+    const fullName = [basic.firstName, basic.middleName, basic.lastName].filter(Boolean).join(' ').trim();
+
+    const panEnc = compliance?.panNumber?.trim()
+      ? this.fieldEncryption.encrypt(compliance.panNumber.toUpperCase().trim())
+      : null;
+    const aadhaarEnc = compliance?.aadhaarNumber?.trim()
+      ? this.fieldEncryption.encrypt(compliance.aadhaarNumber.replace(/\s/g, ''))
+      : null;
+
+    return dataSource.transaction(async (em) => {
+      const empRepo = em.getRepository(Employee);
+      const savedEmployee = await empRepo.save(
+        empRepo.create({
+          ...existingEmployee,
+          name: fullName,
+          email: loginEmail,
+          role,
+          department: employment.department,
+          designation: employment.designation,
+          phoneNumber: basic.mobileNumber,
+          dateOfBirth: basic.dateOfBirth,
+          dateOfJoining: employment.dateOfJoining,
+          firstName: basic.firstName,
+          middleName: basic.middleName,
+          lastName: basic.lastName,
+          gender: basic.gender,
+          personalEmail,
+          officialEmail,
+          alternateMobile: basic.alternateMobile,
+          profilePhotoUrl: basic.profilePhotoUrl,
+          panNumberEnc: panEnc,
+          aadhaarNumberEnc: aadhaarEnc,
+          passportNumber: compliance?.passportNumber,
+          passportExpiry: compliance?.passportExpiry,
+          uanNumber: compliance?.uanNumber,
+          esiNumber: compliance?.esicNumber,
+          pfNumber: compliance?.pfNumber,
+          updatedBy: actorUuid,
+        }),
+      );
+
+      const employmentRepo = em.getRepository(EmployeeEmploymentDetail);
+      const currentEmployment = await employmentRepo.findOne({
+        where: { employee: { id: savedEmployee.id } },
+        relations: ['employee'],
+      });
+      await employmentRepo.save(
+        employmentRepo.create({
+          ...(currentEmployment || {}),
+          employee: savedEmployee,
+          employmentType: employment.employmentType,
+          employmentStatus: employment.employmentStatus,
+          reportingManagerId: this.optionalUuidField(
+            employment.reportingManagerId,
+            'Reporting manager',
+          ),
+          hrManagerId: this.optionalUuidField(employment.hrManagerId, 'HR manager'),
+          workMode: employment.workMode,
+          shift: employment.shift,
+          probationPeriodDays: employment.probationPeriodDays,
+          noticePeriodDays: employment.noticePeriodDays,
+          businessUnit: employment.businessUnit,
+          previousCompanyName: experience?.previousCompanyName?.trim(),
+          previousDesignation: experience?.previousDesignation?.trim(),
+          totalExperienceYears:
+            experience?.totalExperienceYears != null
+              ? String(experience.totalExperienceYears)
+              : undefined,
+          lastDrawnCtc:
+            experience?.lastDrawnCtc != null ? String(experience.lastDrawnCtc) : undefined,
+          experienceSummary: experience?.experienceSummary?.trim(),
+        }),
+      );
+
+      const salaryRepo = em.getRepository(EmployeeSalaryDetail);
+      const currentSalary = await salaryRepo.findOne({
+        where: { employee: { id: savedEmployee.id } },
+        relations: ['employee'],
+      });
+      await salaryRepo.save(
+        salaryRepo.create({
+          ...(currentSalary || {}),
+          employee: savedEmployee,
+          ctc: payroll?.ctc != null ? String(payroll.ctc) : undefined,
+          salaryStructure: payroll?.salaryStructure,
+          basicSalary: payroll?.basicSalary != null ? String(payroll.basicSalary) : undefined,
+          hra: payroll?.hra != null ? String(payroll.hra) : undefined,
+          allowancesJson: payroll?.allowances,
+          pfApplicable: payroll?.pfApplicable ?? true,
+          esicApplicable: payroll?.esicApplicable ?? false,
+          taxRegime: payroll?.taxRegime,
+        }),
+      );
+
+      const bankRepo = em.getRepository(EmployeeBankDetail);
+      const currentBank = await bankRepo.findOne({
+        where: { employee: { id: savedEmployee.id } },
+        relations: ['employee'],
+      });
+      const accEnc = bank?.accountNumber?.trim()
+        ? this.fieldEncryption.encrypt(bank.accountNumber.trim())
+        : currentBank?.accountNumberEnc || null;
+      await bankRepo.save(
+        bankRepo.create({
+          ...(currentBank || {}),
+          employee: savedEmployee,
+          accountHolderName: bank?.accountHolderName,
+          bankName: bank?.bankName,
+          accountNumberEnc: accEnc,
+          accountLastFour: bank?.accountNumber
+            ? this.fieldEncryption.lastFour(bank.accountNumber)
+            : currentBank?.accountLastFour || null,
+          ifscCode: bank?.ifscCode,
+          branchName: bank?.branchName,
+          verificationStatus: bank?.verificationStatus || 'PENDING',
+        }),
+      );
+
+      const accessRepo = em.getRepository(EmployeeAccessControl);
+      const currentAccess = await accessRepo.findOne({
+        where: { employee: { id: savedEmployee.id } },
+        relations: ['employee'],
+      });
+      await accessRepo.save(
+        accessRepo.create({
+          ...(currentAccess || {}),
+          employee: savedEmployee,
+          hrmsAccessEnabled: access?.hrmsAccessEnabled ?? true,
+          welcomeEmailEnabled: access?.welcomeEmailEnabled ?? false,
+          mfaEnabled: access?.mfaEnabled ?? false,
+          portalRoleLabel: access?.portalRoleLabel,
+        }),
+      );
+
+      const emergencyRepo = em.getRepository(EmployeeEmergencyContact);
+      const currentEmergency = await emergencyRepo.findOne({
+        where: { employee: { id: savedEmployee.id } },
+        relations: ['employee'],
+      });
+      const ecName = emergencyContact?.contactName?.trim() ?? '';
+      const ecPhone = emergencyContact?.contactPhone?.trim() ?? '';
+      const ecRel = emergencyContact?.relationship?.trim() ?? '';
+      if (ecName && ecPhone && ecRel) {
+        await emergencyRepo.save(
+          emergencyRepo.create({
+            ...(currentEmergency || {}),
+            employee: savedEmployee,
+            contactName: ecName,
+            contactPhone: ecPhone,
+            relationship: ecRel,
+          }),
+        );
+      }
+
+      await em.getRepository(EmployeeAuditLog).save(
+        em.getRepository(EmployeeAuditLog).create({
+          employee: savedEmployee,
+          actorId: actorUuid,
+          action: 'HR_ONBOARDING_UPDATE',
+          metadata: { employeeCode: savedEmployee.employeeCode, email: savedEmployee.email },
+        }),
+      );
+
+      return savedEmployee;
+    });
+  }
+
   /** JWT `sub` and several satellite columns are PostgreSQL uuid — reject bad values before INSERT. */
   private requireActorUuid(actorId: string): string {
     const t = (actorId || '').trim();
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t)) {
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t)
+    ) {
       throw new BadRequestException(
         'Invalid performer id on token (expected UUID). Sign out and sign in again, then retry.',
       );
@@ -427,11 +741,18 @@ export class EmployeesService {
     return t;
   }
 
-  private optionalUuidField(value: string | undefined, label: string): string | undefined {
+  private optionalUuidField(
+    value: string | undefined,
+    label: string,
+  ): string | undefined {
     if (value == null || String(value).trim() === '') return undefined;
     const t = String(value).trim();
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t)) {
-      throw new BadRequestException(`${label} must be a valid employee id (UUID) or left empty.`);
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t)
+    ) {
+      throw new BadRequestException(
+        `${label} must be a valid employee id (UUID) or left empty.`,
+      );
     }
     return t;
   }
@@ -483,6 +804,73 @@ export class EmployeesService {
     if (missingFields.length > 0) {
       throw new BadRequestException(
         `Missing required fields: ${missingFields.join(', ')}`,
+      );
+    }
+  }
+
+  private validateDepartmentAndDesignation(
+    department: string | undefined,
+    designation: string | undefined,
+    rawDepartments: unknown,
+    rawDesignations: unknown,
+  ): void {
+    const selectedDepartment = department?.trim();
+    const selectedDesignation = designation?.trim();
+    if (!selectedDepartment && !selectedDesignation) {
+      return;
+    }
+
+    const departments = Array.isArray(rawDepartments)
+      ? (rawDepartments as EmployeeDepartmentSetting[])
+      : [];
+    const designations = Array.isArray(rawDesignations)
+      ? (rawDesignations as EmployeeDesignationSetting[])
+      : [];
+
+    // Backward compatibility: if master data is not configured, do not block onboarding.
+    if (departments.length === 0 || designations.length === 0) {
+      return;
+    }
+
+    if (!selectedDepartment || !selectedDesignation) {
+      throw new BadRequestException(
+        'Department and designation must both be provided when employee masters are configured.',
+      );
+    }
+
+    const matchedDepartment = departments.find(
+      (d) =>
+        d?.isActive &&
+        typeof d?.name === 'string' &&
+        d.name.trim().toLowerCase() === selectedDepartment.toLowerCase(),
+    );
+
+    if (!matchedDepartment) {
+      throw new BadRequestException(
+        `Department "${selectedDepartment}" is not available for this organization.`,
+      );
+    }
+
+    const matchedDesignation = designations.find(
+      (d) =>
+        d?.isActive &&
+        typeof d?.name === 'string' &&
+        d.name.trim().toLowerCase() === selectedDesignation.toLowerCase(),
+    );
+
+    if (!matchedDesignation) {
+      throw new BadRequestException(
+        `Designation "${selectedDesignation}" is not available for this organization.`,
+      );
+    }
+
+    const allowedDepartmentIds = Array.isArray(matchedDesignation.departmentIds)
+      ? matchedDesignation.departmentIds
+      : [];
+
+    if (!allowedDepartmentIds.includes(matchedDepartment.id)) {
+      throw new BadRequestException(
+        `Designation "${selectedDesignation}" is not mapped to department "${selectedDepartment}".`,
       );
     }
   }
@@ -555,7 +943,10 @@ export class EmployeesService {
   /**
    * Find employee by email in tenant database
    */
-  async findByEmail(email: string, dataSource: DataSource): Promise<Employee | null> {
+  async findByEmail(
+    email: string,
+    dataSource: DataSource,
+  ): Promise<Employee | null> {
     const repo = dataSource.getRepository(Employee);
     return repo.findOne({
       where: { email: email.toLowerCase().trim() },
@@ -567,7 +958,16 @@ export class EmployeesService {
    */
   async findById(id: string, dataSource: DataSource): Promise<Employee | null> {
     const repo = dataSource.getRepository(Employee);
-    return repo.findOne({ where: { id } });
+    return repo.findOne({
+      where: { id },
+      relations: [
+        'employmentDetail',
+        'salaryDetail',
+        'bankDetail',
+        'accessControl',
+        'emergencyContactDetail',
+      ],
+    });
   }
 
   /**
@@ -597,10 +997,51 @@ export class EmployeesService {
         'status',
         'department',
         'designation',
+        'phoneNumber',
         'dateOfJoining',
         'createdAt',
       ],
     });
+  }
+
+  async updateEmployee(
+    employeeId: string,
+    dto: UpdateEmployeeDto,
+    dataSource: DataSource,
+    actorId: string,
+  ): Promise<Employee> {
+    const repo = dataSource.getRepository(Employee);
+    const employee = await repo.findOne({ where: { id: employeeId } });
+    if (!employee) {
+      throw new BadRequestException('Employee not found');
+    }
+
+    if (dto.email && dto.email.trim().toLowerCase() !== employee.email) {
+      const email = dto.email.trim().toLowerCase();
+      const existing = await repo.findOne({ where: { email } });
+      if (existing && existing.id !== employeeId) {
+        throw new ConflictException('Employee already exists with this email');
+      }
+      employee.email = email;
+    }
+
+    if (dto.name != null) employee.name = dto.name.trim();
+    if (dto.role != null) employee.role = dto.role;
+    if (dto.status != null) employee.status = dto.status;
+    if (dto.department !== undefined) employee.department = dto.department || undefined;
+    if (dto.designation !== undefined) employee.designation = dto.designation || undefined;
+    if (dto.phoneNumber !== undefined) employee.phoneNumber = dto.phoneNumber || undefined;
+    if (dto.dateOfJoining !== undefined) employee.dateOfJoining = dto.dateOfJoining || undefined;
+    if (
+      actorId &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        actorId,
+      )
+    ) {
+      employee.updatedBy = actorId;
+    }
+
+    return repo.save(employee);
   }
 
   /**
@@ -636,7 +1077,8 @@ export class EmployeesService {
     }
 
     const temporaryPassword = this.passwordService.generateTemporaryPassword();
-    const hashedPassword = await this.passwordService.hashPassword(temporaryPassword);
+    const hashedPassword =
+      await this.passwordService.hashPassword(temporaryPassword);
     const expiresAt = this.passwordService.getTempPasswordExpiry();
 
     await repo.update(employeeId, {

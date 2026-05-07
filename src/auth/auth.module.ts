@@ -38,6 +38,12 @@ import { AuthRefreshService } from './auth-refresh.service';
     AuthCookieService,
     AuthRefreshService,
   ],
-  exports: [AuthService, TenantAuthService, AuthTokenGuard, RolesGuard, AuthCookieService],
+  exports: [
+    AuthService,
+    TenantAuthService,
+    AuthTokenGuard,
+    RolesGuard,
+    AuthCookieService,
+  ],
 })
 export class AuthModule {}

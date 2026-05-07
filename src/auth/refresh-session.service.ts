@@ -2,7 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { createHash, randomBytes } from 'crypto';
-import { RefreshSession, RefreshSessionKind } from './entities/refresh-session.entity';
+import {
+  RefreshSession,
+  RefreshSessionKind,
+} from './entities/refresh-session.entity';
 
 @Injectable()
 export class RefreshSessionService {
@@ -19,7 +22,10 @@ export class RefreshSessionService {
     return randomBytes(48).toString('base64url');
   }
 
-  async issueMasterSession(masterUserId: string, expiresAt: Date): Promise<{ plain: string }> {
+  async issueMasterSession(
+    masterUserId: string,
+    expiresAt: Date,
+  ): Promise<{ plain: string }> {
     const plain = this.newRefreshPlain();
     await this.refreshRepo.save(
       this.refreshRepo.create({

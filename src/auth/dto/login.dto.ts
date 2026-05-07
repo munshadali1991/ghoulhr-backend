@@ -11,9 +11,10 @@ export class LoginDto {
   @IsNotEmpty()
   password: string;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     example: 'acme',
-    description: 'Organization subdomain for tenant routing (required for employee login)'
+    description:
+      'Organization subdomain for tenant routing (required for employee login)',
   })
   @IsString()
   @IsOptional()

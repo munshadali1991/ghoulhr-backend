@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Body,
   Param,
   UseGuards,
@@ -11,11 +12,16 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { EmployeesService } from './employees.service';
-import { CreateEmployeeDto, CreateEmployeeResponseDto, ResetPasswordResponseDto } from './dto/create-employee.dto';
+import {
+  CreateEmployeeDto,
+  CreateEmployeeResponseDto,
+  ResetPasswordResponseDto,
+} from './dto/create-employee.dto';
 import {
   CheckEmployeeDuplicateDto,
   EmployeeOnboardingCreateDto,
 } from './dto/employee-onboarding.dto';
+import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { TenantAuthGuard } from '../auth/guards/tenant-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -38,14 +44,17 @@ export class EmployeesController {
     this.logger.log(
       `Fetching all employees for tenant: ${req.organization?.subdomain}`,
     );
-    return this.employeesService.findAll(req.tenantDataSource!);
+    return this.employeesService.findAll(req.tenantDataSource);
   }
 
   @Post('check-duplicate')
   @Roles(EmployeeRole.ORG_ADMIN)
   @ApiOperation({ summary: 'Check duplicate email / phone before onboarding' })
-  async checkDuplicate(@Req() req: TenantRequest, @Body() dto: CheckEmployeeDuplicateDto) {
-    return this.employeesService.checkDuplicates(dto, req.tenantDataSource!);
+  async checkDuplicate(
+    @Req() req: TenantRequest,
+    @Body() dto: CheckEmployeeDuplicateDto,
+  ) {
+    return this.employeesService.checkDuplicates(dto, req.tenantDataSource);
   }
 
   @Post('hr-onboarding')
@@ -57,11 +66,13 @@ export class EmployeesController {
   ): Promise<CreateEmployeeResponseDto> {
     const actorSub = req.user?.sub?.trim();
     if (!actorSub) {
-      throw new UnauthorizedException('Access token is missing subject (sub). Sign in again.');
+      throw new UnauthorizedException(
+        'Access token is missing subject (sub). Sign in again.',
+      );
     }
     const result = await this.employeesService.createHrOnboarding(
       dto,
-      req.tenantDataSource!,
+      req.tenantDataSource,
       actorSub,
     );
     return {
@@ -86,6 +97,28 @@ export class EmployeesController {
     };
   }
 
+  @Patch(':id/hr-onboarding')
+  @Roles(EmployeeRole.ORG_ADMIN)
+  @ApiOperation({ summary: 'Update employee via modular HR onboarding payload' })
+  async updateHrOnboarding(
+    @Req() req: TenantRequest,
+    @Param('id') id: string,
+    @Body() dto: EmployeeOnboardingCreateDto,
+  ) {
+    const actorSub = req.user?.sub?.trim();
+    if (!actorSub) {
+      throw new UnauthorizedException(
+        'Access token is missing subject (sub). Sign in again.',
+      );
+    }
+    return this.employeesService.updateHrOnboarding(
+      id,
+      dto,
+      req.tenantDataSource,
+      actorSub,
+    );
+  }
+
   @Get(':id')
   @Roles(EmployeeRole.ORG_ADMIN, EmployeeRole.MANAGER)
   @ApiOperation({ summary: 'Get employee by ID' })
@@ -95,7 +128,7 @@ export class EmployeesController {
     );
     const employee = await this.employeesService.findById(
       id,
-      req.tenantDataSource!,
+      req.tenantDataSource,
     );
     if (!employee) {
       return { message: 'Employee not found' };
@@ -116,7 +149,7 @@ export class EmployeesController {
 
     const result = await this.employeesService.create(
       dto,
-      req.tenantDataSource!,
+      req.tenantDataSource,
       req.user?.sub || '', // createdBy employee ID
     );
 
@@ -155,7 +188,7 @@ export class EmployeesController {
 
     const result = await this.employeesService.resetPassword(
       id,
-      req.tenantDataSource!,
+      req.tenantDataSource,
     );
 
     return {
@@ -163,5 +196,24 @@ export class EmployeesController {
       expiresAt: result.expiresAt,
       message: 'Password reset successfully. Share new credentials securely.',
     };
+  }
+
+  @Patch(':id')
+  @Roles(EmployeeRole.ORG_ADMIN)
+  @ApiOperation({ summary: 'Update employee details (admin only)' })
+  async updateEmployee(
+    @Req() req: TenantRequest,
+    @Param('id') id: string,
+    @Body() dto: UpdateEmployeeDto,
+  ) {
+    this.logger.log(
+      `Updating employee ${id} for tenant: ${req.organization?.subdomain}`,
+    );
+    return this.employeesService.updateEmployee(
+      id,
+      dto,
+      req.tenantDataSource,
+      req.user?.sub || '',
+    );
   }
 }

@@ -15,7 +15,9 @@ import { join } from 'path';
           ...db,
           autoLoadEntities: true,
           // Use compiled JS migrations from dist to avoid Node ESM/CJS import issues in dev runtime.
-          migrations: [join(process.cwd(), 'dist', 'src', 'migrations', '*.js')],
+          migrations: [
+            join(process.cwd(), 'dist', 'src', 'migrations', '*.js'),
+          ],
           migrationsRun: true,
         };
       },

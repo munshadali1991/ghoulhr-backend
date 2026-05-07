@@ -1,4 +1,10 @@
-import { Injectable, NestMiddleware, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NestMiddleware,
+  NotFoundException,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import { DataSource } from 'typeorm';
 import { OrganizationsService } from '../../organizations/organizations.service';
@@ -37,13 +43,22 @@ export class TenantResolverMiddleware implements NestMiddleware {
       return next();
     }
 
-    const lockedSubdomain = this.configService.get<string>('TENANT_LOCK_SUBDOMAIN')?.trim();
+    const lockedSubdomain = this.configService
+      .get<string>('TENANT_LOCK_SUBDOMAIN')
+      ?.trim();
     if (lockedSubdomain) {
-      const lockedOrganization = await this.orgService.findBySubdomain(lockedSubdomain);
+      const lockedOrganization =
+        await this.orgService.findBySubdomain(lockedSubdomain);
       if (!lockedOrganization) {
-        throw new NotFoundException(`Locked tenant "${lockedSubdomain}" not found.`);
+        throw new NotFoundException(
+          `Locked tenant "${lockedSubdomain}" not found.`,
+        );
       }
-      await this.attachTenantContext(req, lockedOrganization, `locked:${lockedSubdomain}`);
+      await this.attachTenantContext(
+        req,
+        lockedOrganization,
+        `locked:${lockedSubdomain}`,
+      );
       return next();
     }
 
@@ -71,7 +86,11 @@ export class TenantResolverMiddleware implements NestMiddleware {
       return next(); // No subdomain, skip
     }
 
-    const apiSubdomain = (this.configService.get<string>('API_SUBDOMAIN') ?? 'api').trim().toLowerCase();
+    const apiSubdomain = (
+      this.configService.get<string>('API_SUBDOMAIN') ?? 'api'
+    )
+      .trim()
+      .toLowerCase();
     if (subdomain.toLowerCase() === apiSubdomain) {
       return next();
     }
@@ -89,18 +108,20 @@ export class TenantResolverMiddleware implements NestMiddleware {
   }
 
   private shouldSkipTenantResolution(path: string): boolean {
-    return this.excludedPaths.some((excludedPath) => path.startsWith(excludedPath));
+    return this.excludedPaths.some((excludedPath) =>
+      path.startsWith(excludedPath),
+    );
   }
 
   private extractMainDomain(host: string): string {
     // Extract main domain from host (e.g., "ghoulhr.com" from "buggy.ghoulhr.com")
     const hostname = this.extractHostname(host);
     const domainParts = hostname.split('.');
-    
+
     if (domainParts.length >= 2) {
       return domainParts.slice(-2).join('.');
     }
-    
+
     return hostname;
   }
 
@@ -110,17 +131,17 @@ export class TenantResolverMiddleware implements NestMiddleware {
     if (hostname === mainDomain) {
       return null;
     }
-    
+
     if (hostname.endsWith(`.${mainDomain}`)) {
       const subdomain = hostname.replace(`.${mainDomain}`, '');
       return subdomain || null;
     }
-    
+
     // Handle localhost subdomains (e.g., buggy.localhost)
     if (hostname.includes('.localhost')) {
       return hostname.split('.')[0];
     }
-    
+
     return null;
   }
 
@@ -142,19 +163,28 @@ export class TenantResolverMiddleware implements NestMiddleware {
     return maybePort;
   }
 
-  private async attachTenantContext(req: TenantRequest, organization: any, label: string): Promise<void> {
+  private async attachTenantContext(
+    req: TenantRequest,
+    organization: any,
+    label: string,
+  ): Promise<void> {
     if (organization.status !== OrganizationStatus.ACTIVE) {
       throw new ForbiddenException('This organization account is suspended.');
     }
 
     try {
-      const tenantDataSource = await this.tenantConnectionManager.getOrCreateConnection(organization);
+      const tenantDataSource =
+        await this.tenantConnectionManager.getOrCreateConnection(organization);
       req.tenantDataSource = tenantDataSource;
       req.organization = organization;
       this.logger.debug(`Tenant resolved: ${label} -> ${organization.dbName}`);
     } catch (error) {
-      this.logger.error(`Failed to get tenant connection for ${label}: ${error.message}`);
-      throw new NotFoundException(`Tenant database not available for "${label}"`);
+      this.logger.error(
+        `Failed to get tenant connection for ${label}: ${error.message}`,
+      );
+      throw new NotFoundException(
+        `Tenant database not available for "${label}"`,
+      );
     }
   }
 }

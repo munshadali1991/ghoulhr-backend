@@ -1,21 +1,30 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { DataSource, Repository } from 'typeorm';
 import { OrganizationSetting } from './entities/organization-setting.entity';
-import { CreateSettingDto, UpdateOrgProfileDto, UpdateEmployeeSettingsDto, UpdateAttendanceSettingsDto, ShiftDto } from './dto/create-setting.dto';
+import {
+  CreateSettingDto,
+  UpdateOrgProfileDto,
+  UpdateEmployeeSettingsDto,
+  UpdateAttendanceSettingsDto,
+  ShiftDto,
+} from './dto/create-setting.dto';
 import { SETTING_KEYS } from './settings.constants';
 
 @Injectable()
 export class SettingsService {
   private readonly logger = new Logger(SettingsService.name);
 
-  async getSetting(key: string, dataSource: DataSource): Promise<OrganizationSetting> {
+  async getSetting(
+    key: string,
+    dataSource: DataSource,
+  ): Promise<OrganizationSetting> {
     const repo = this.getRepository(dataSource);
     const setting = await repo.findOne({ where: { key } });
-    
+
     if (!setting) {
       throw new NotFoundException(`Setting '${key}' not found`);
     }
-    
+
     return setting;
   }
 
@@ -24,23 +33,30 @@ export class SettingsService {
     return repo.find({ order: { createdAt: 'ASC' } });
   }
 
-  async setSetting(key: string, value: any, dataSource: DataSource): Promise<OrganizationSetting> {
+  async setSetting(
+    key: string,
+    value: any,
+    dataSource: DataSource,
+  ): Promise<OrganizationSetting> {
     const repo = this.getRepository(dataSource);
-    
+
     let setting = await repo.findOne({ where: { key } });
-    
+
     if (setting) {
       setting.value = value;
     } else {
       setting = repo.create({ key, value });
     }
-    
+
     return repo.save(setting);
   }
 
-  async updateOrgProfile(dto: UpdateOrgProfileDto, dataSource: DataSource): Promise<Record<string, any>> {
+  async updateOrgProfile(
+    dto: UpdateOrgProfileDto,
+    dataSource: DataSource,
+  ): Promise<Record<string, any>> {
     const updates: Record<string, any> = {};
-    
+
     const mapping = {
       name: SETTING_KEYS.ORG_NAME,
       logo: SETTING_KEYS.ORG_LOGO,
@@ -63,7 +79,7 @@ export class SettingsService {
   async getOrgProfile(dataSource: DataSource): Promise<Record<string, any>> {
     const profile: Record<string, any> = {};
     const allSettings = await this.getAllSettings(dataSource);
-    
+
     const mapping = {
       [SETTING_KEYS.ORG_NAME]: 'name',
       [SETTING_KEYS.ORG_LOGO]: 'logo',
@@ -82,19 +98,26 @@ export class SettingsService {
     return profile;
   }
 
-  private getRepository(dataSource: DataSource): Repository<OrganizationSetting> {
+  private getRepository(
+    dataSource: DataSource,
+  ): Repository<OrganizationSetting> {
     return dataSource.getRepository(OrganizationSetting);
   }
 
-  async getEmployeeSettings(dataSource: DataSource): Promise<Record<string, any>> {
+  async getEmployeeSettings(
+    dataSource: DataSource,
+  ): Promise<Record<string, any>> {
     const employeeSettings: Record<string, any> = {};
     const allSettings = await this.getAllSettings(dataSource);
-    
+
     const mapping = {
       [SETTING_KEYS.EMPLOYEE_ID_PREFIX]: 'id_prefix',
       [SETTING_KEYS.EMPLOYEE_AUTO_GENERATE_ID]: 'auto_generate_id',
       [SETTING_KEYS.EMPLOYEE_REQUIRED_FIELDS]: 'required_fields',
-      [SETTING_KEYS.EMPLOYEE_DEFAULT_PROBATION_PERIOD]: 'default_probation_period',
+      [SETTING_KEYS.EMPLOYEE_DEFAULT_PROBATION_PERIOD]:
+        'default_probation_period',
+      [SETTING_KEYS.EMPLOYEE_DEPARTMENTS]: 'departments',
+      [SETTING_KEYS.EMPLOYEE_DESIGNATIONS]: 'designations',
     };
 
     for (const setting of allSettings) {
@@ -106,14 +129,19 @@ export class SettingsService {
     return employeeSettings;
   }
 
-  async updateEmployeeSettings(dto: UpdateEmployeeSettingsDto, dataSource: DataSource): Promise<Record<string, any>> {
+  async updateEmployeeSettings(
+    dto: UpdateEmployeeSettingsDto,
+    dataSource: DataSource,
+  ): Promise<Record<string, any>> {
     const updates: Record<string, any> = {};
-    
+
     const mapping = {
       id_prefix: SETTING_KEYS.EMPLOYEE_ID_PREFIX,
       auto_generate_id: SETTING_KEYS.EMPLOYEE_AUTO_GENERATE_ID,
       required_fields: SETTING_KEYS.EMPLOYEE_REQUIRED_FIELDS,
       default_probation_period: SETTING_KEYS.EMPLOYEE_DEFAULT_PROBATION_PERIOD,
+      departments: SETTING_KEYS.EMPLOYEE_DEPARTMENTS,
+      designations: SETTING_KEYS.EMPLOYEE_DESIGNATIONS,
     };
 
     for (const [field, key] of Object.entries(mapping)) {
@@ -126,15 +154,18 @@ export class SettingsService {
     return updates;
   }
 
-  async getAttendanceSettings(dataSource: DataSource): Promise<Record<string, any>> {
+  async getAttendanceSettings(
+    dataSource: DataSource,
+  ): Promise<Record<string, any>> {
     const attendanceSettings: Record<string, any> = {};
     const allSettings = await this.getAllSettings(dataSource);
-    
+
     const mapping = {
       [SETTING_KEYS.ATTENDANCE_WORKING_DAYS]: 'working_days',
       [SETTING_KEYS.ATTENDANCE_SHIFTS]: 'shifts',
       [SETTING_KEYS.ATTENDANCE_GRACE_PERIOD]: 'grace_period_minutes',
-      [SETTING_KEYS.ATTENDANCE_HALF_DAY_THRESHOLD]: 'half_day_threshold_minutes',
+      [SETTING_KEYS.ATTENDANCE_HALF_DAY_THRESHOLD]:
+        'half_day_threshold_minutes',
       [SETTING_KEYS.ATTENDANCE_OVERTIME_ENABLED]: 'overtime_enabled',
       [SETTING_KEYS.ATTENDANCE_OVERTIME_RULES]: 'overtime_rules',
       [SETTING_KEYS.ATTENDANCE_TRACKING_MODE]: 'tracking_mode',
@@ -151,9 +182,12 @@ export class SettingsService {
     return attendanceSettings;
   }
 
-  async updateAttendanceSettings(dto: UpdateAttendanceSettingsDto, dataSource: DataSource): Promise<Record<string, any>> {
+  async updateAttendanceSettings(
+    dto: UpdateAttendanceSettingsDto,
+    dataSource: DataSource,
+  ): Promise<Record<string, any>> {
     const updates: Record<string, any> = {};
-    
+
     const mapping = {
       working_days: SETTING_KEYS.ATTENDANCE_WORKING_DAYS,
       shifts: SETTING_KEYS.ATTENDANCE_SHIFTS,
@@ -179,11 +213,11 @@ export class SettingsService {
   async getDefaultShift(dataSource: DataSource): Promise<ShiftDto | null> {
     const settings = await this.getAttendanceSettings(dataSource);
     const shifts = settings.shifts;
-    
+
     if (!shifts || shifts.length === 0) {
       return null;
     }
-    
+
     return shifts[0];
   }
 }

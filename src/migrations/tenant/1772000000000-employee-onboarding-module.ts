@@ -4,7 +4,9 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * Modular onboarding storage: core employees extended + satellite tables.
  * New tenants run this after base employee table exists.
  */
-export class EmployeeOnboardingModule1772000000000 implements MigrationInterface {
+export class EmployeeOnboardingModule1772000000000
+  implements MigrationInterface
+{
   name = 'EmployeeOnboardingModule1772000000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
@@ -157,7 +159,9 @@ export class EmployeeOnboardingModule1772000000000 implements MigrationInterface
     await queryRunner.query(`DROP TABLE IF EXISTS "employee_documents"`);
     await queryRunner.query(`DROP TABLE IF EXISTS "employee_bank_details"`);
     await queryRunner.query(`DROP TABLE IF EXISTS "employee_salary_details"`);
-    await queryRunner.query(`DROP TABLE IF EXISTS "employee_employment_details"`);
+    await queryRunner.query(
+      `DROP TABLE IF EXISTS "employee_employment_details"`,
+    );
     await queryRunner.query(`
       ALTER TABLE "employees"
       DROP COLUMN IF EXISTS "firstName",

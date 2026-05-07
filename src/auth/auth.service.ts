@@ -36,8 +36,15 @@ export class AuthService {
     private readonly refreshSessionService: RefreshSessionService,
   ) {}
 
-  async register(dto: RegisterDto, req: TenantAwareRequest, bootstrapAdminKey?: string) {
-    const organizationId = await this.resolveOrganizationId(req, dto.organizationId);
+  async register(
+    dto: RegisterDto,
+    req: TenantAwareRequest,
+    bootstrapAdminKey?: string,
+  ) {
+    const organizationId = await this.resolveOrganizationId(
+      req,
+      dto.organizationId,
+    );
     const requestedRole = dto.role ?? Role.EMPLOYEE;
     this.assertRoleAllowed(requestedRole, bootstrapAdminKey);
 
@@ -49,7 +56,12 @@ export class AuthService {
       role: requestedRole,
     });
 
-    return this.buildAuthResponse(user.id, user.organizationId, user.email, user.role);
+    return this.buildAuthResponse(
+      user.id,
+      user.organizationId,
+      user.email,
+      user.role,
+    );
   }
 
   async login(dto: LoginDto, req: TenantAwareRequest) {
@@ -62,10 +74,18 @@ export class AuthService {
       throw new ForbiddenException('User account is inactive');
     }
 
-    return this.buildAuthResponse(user.id, user.organizationId, user.email, user.role);
+    return this.buildAuthResponse(
+      user.id,
+      user.organizationId,
+      user.email,
+      user.role,
+    );
   }
 
-  async bootstrapSuperAdmin(dto: BootstrapSuperAdminDto, bootstrapAdminKey?: string) {
+  async bootstrapSuperAdmin(
+    dto: BootstrapSuperAdminDto,
+    bootstrapAdminKey?: string,
+  ) {
     const configuredKey = this.configService.get<string>('BOOTSTRAP_ADMIN_KEY');
     if (!configuredKey || bootstrapAdminKey !== configuredKey) {
       throw new ForbiddenException('Invalid bootstrap key');
@@ -77,14 +97,17 @@ export class AuthService {
     }
 
     const fallbackName =
-      this.configService.get<string>('DEFAULT_ORGANIZATION_NAME') ?? 'Default Organization';
+      this.configService.get<string>('DEFAULT_ORGANIZATION_NAME') ??
+      'Default Organization';
     const fallbackSubdomain =
-      this.configService.get<string>('DEFAULT_ORGANIZATION_SUBDOMAIN') ?? 'default';
+      this.configService.get<string>('DEFAULT_ORGANIZATION_SUBDOMAIN') ??
+      'default';
 
     const organizationName = dto.organizationName?.trim() || fallbackName;
     const subdomain = dto.subdomain?.trim() || fallbackSubdomain;
 
-    let organization = await this.organizationsService.findBySubdomain(subdomain);
+    let organization =
+      await this.organizationsService.findBySubdomain(subdomain);
     if (!organization) {
       organization = await this.organizationsService.create({
         name: organizationName,
@@ -100,7 +123,12 @@ export class AuthService {
       role: Role.SUPER_ADMIN,
     });
 
-    return this.buildAuthResponse(user.id, user.organizationId, user.email, user.role);
+    return this.buildAuthResponse(
+      user.id,
+      user.organizationId,
+      user.email,
+      user.role,
+    );
   }
 
   async ensureDefaultSuperAdmin() {
@@ -110,14 +138,20 @@ export class AuthService {
     }
 
     const defaultEmail =
-      this.configService.get<string>('DEFAULT_SUPERADMIN_EMAIL') ?? 'ghoulsuper@ghoulhr.com';
+      this.configService.get<string>('DEFAULT_SUPERADMIN_EMAIL') ??
+      'ghoulsuper@ghoulhr.com';
     const defaultPassword =
-      this.configService.get<string>('DEFAULT_SUPERADMIN_PASSWORD') ?? 'Ghoul@123#';
+      this.configService.get<string>('DEFAULT_SUPERADMIN_PASSWORD') ??
+      'Ghoul@123#';
     const organizationName =
-      this.configService.get<string>('DEFAULT_ORGANIZATION_NAME') ?? 'GhoulHRMS';
-    const subdomain = this.configService.get<string>('DEFAULT_ORGANIZATION_SUBDOMAIN') ?? 'ghoulhr';
+      this.configService.get<string>('DEFAULT_ORGANIZATION_NAME') ??
+      'GhoulHRMS';
+    const subdomain =
+      this.configService.get<string>('DEFAULT_ORGANIZATION_SUBDOMAIN') ??
+      'ghoulhr';
 
-    let organization = await this.organizationsService.findBySubdomain(subdomain);
+    let organization =
+      await this.organizationsService.findBySubdomain(subdomain);
     if (!organization) {
       organization = await this.organizationsService.create({
         name: organizationName,
@@ -133,7 +167,9 @@ export class AuthService {
       role: Role.SUPER_ADMIN,
     });
 
-    this.logger.log(`Default SUPER_ADMIN created for organization "${organization.subdomain}"`);
+    this.logger.log(
+      `Default SUPER_ADMIN created for organization "${organization.subdomain}"`,
+    );
     return true;
   }
 
@@ -150,12 +186,17 @@ export class AuthService {
 
     let parsedPayload: AuthTokenPayload;
     try {
-      parsedPayload = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+      parsedPayload = JSON.parse(
+        Buffer.from(payload, 'base64url').toString('utf8'),
+      );
     } catch {
       throw new UnauthorizedException('Invalid token payload');
     }
 
-    if (!parsedPayload.exp || parsedPayload.exp < Math.floor(Date.now() / 1000)) {
+    if (
+      !parsedPayload.exp ||
+      parsedPayload.exp < Math.floor(Date.now() / 1000)
+    ) {
       throw new UnauthorizedException('Token expired');
     }
 
@@ -168,9 +209,12 @@ export class AuthService {
     email: string,
     role: Role,
   ) {
-    const organization = await this.organizationsService.findById(organizationId);
+    const organization =
+      await this.organizationsService.findById(organizationId);
     if (!organization) {
-      throw new UnauthorizedException('Organization not found for authenticated user');
+      throw new UnauthorizedException(
+        'Organization not found for authenticated user',
+      );
     }
 
     const accessToken = this.mintAccessToken({
@@ -182,10 +226,11 @@ export class AuthService {
     });
 
     const refreshExpires = this.getRefreshExpiryDate();
-    const { plain: refreshPlain } = await this.refreshSessionService.issueMasterSession(
-      userId,
-      refreshExpires,
-    );
+    const { plain: refreshPlain } =
+      await this.refreshSessionService.issueMasterSession(
+        userId,
+        refreshExpires,
+      );
 
     return {
       accessToken,
@@ -202,7 +247,8 @@ export class AuthService {
 
   /** Public: mint a short-lived access token (shared with tenant employee auth). */
   mintAccessToken(
-    payload: Omit<AuthTokenPayload, 'exp'> & Partial<Pick<AuthTokenPayload, 'employeeCode' | 'name'>>,
+    payload: Omit<AuthTokenPayload, 'exp'> &
+      Partial<Pick<AuthTokenPayload, 'employeeCode' | 'name'>>,
   ): string {
     const full: AuthTokenPayload = {
       ...payload,
@@ -212,7 +258,8 @@ export class AuthService {
   }
 
   getRefreshTtlMs(): number {
-    const raw = this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') ?? '7d';
+    const raw =
+      this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') ?? '7d';
     const sec = this.parseTtlToSeconds(raw) ?? 7 * 24 * 60 * 60;
     return sec * 1000;
   }
@@ -223,10 +270,13 @@ export class AuthService {
 
   private async resolveLoginUser(req: TenantAwareRequest, email: string) {
     const tenantOrganizationId = req.organization?.id;
-    
+
     // First attempt: Search in tenant organization (if available)
     if (tenantOrganizationId) {
-      const tenantUser = await this.usersService.findByEmailAndOrganization(email, tenantOrganizationId);
+      const tenantUser = await this.usersService.findByEmailAndOrganization(
+        email,
+        tenantOrganizationId,
+      );
       if (tenantUser) {
         return tenantUser;
       }
@@ -235,19 +285,21 @@ export class AuthService {
     // Enhanced: If user not found in tenant org, search globally across all organizations
     // This allows SUPER_ADMIN to login from any subdomain
     const candidates = await this.usersService.findByEmail(email);
-    
+
     if (candidates.length === 0) {
       return null;
     }
 
     // SUPER_ADMIN Priority: If multiple users found with same email, prioritize SUPER_ADMIN role
     if (candidates.length > 1) {
-      const superAdmin = candidates.find(c => c.role === Role.SUPER_ADMIN);
+      const superAdmin = candidates.find((c) => c.role === Role.SUPER_ADMIN);
       if (superAdmin) {
-        this.logger.log(`Multiple users found for email ${email}, prioritizing SUPER_ADMIN role`);
+        this.logger.log(
+          `Multiple users found for email ${email}, prioritizing SUPER_ADMIN role`,
+        );
         return superAdmin;
       }
-      
+
       // If no SUPER_ADMIN, throw error to prevent ambiguity
       throw new ForbiddenException(
         'Multiple organizations found for this email. Please login from your organization subdomain.',
@@ -258,10 +310,19 @@ export class AuthService {
     return candidates[0];
   }
 
-  private async resolveOrganizationId(req: TenantAwareRequest, dtoOrganizationId?: string) {
+  private async resolveOrganizationId(
+    req: TenantAwareRequest,
+    dtoOrganizationId?: string,
+  ) {
     const tenantOrganizationId = req.organization?.id;
-    if (tenantOrganizationId && dtoOrganizationId && tenantOrganizationId !== dtoOrganizationId) {
-      throw new ForbiddenException('Cross-tenant organization assignment is not allowed');
+    if (
+      tenantOrganizationId &&
+      dtoOrganizationId &&
+      tenantOrganizationId !== dtoOrganizationId
+    ) {
+      throw new ForbiddenException(
+        'Cross-tenant organization assignment is not allowed',
+      );
     }
 
     const organizationId = tenantOrganizationId ?? dtoOrganizationId;
@@ -271,7 +332,8 @@ export class AuthService {
       );
     }
 
-    const organization = await this.organizationsService.findById(organizationId);
+    const organization =
+      await this.organizationsService.findById(organizationId);
     if (!organization) {
       throw new BadRequestException('Organization does not exist');
     }
@@ -291,7 +353,9 @@ export class AuthService {
   }
 
   private generateAccessToken(payload: AuthTokenPayload) {
-    const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+    const header = Buffer.from(
+      JSON.stringify({ alg: 'HS256', typ: 'JWT' }),
+    ).toString('base64url');
     const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
     const signature = this.sign(`${header}.${body}`);
     return `${header}.${body}.${signature}`;
@@ -302,7 +366,9 @@ export class AuthService {
       this.configService.get<string>('JWT_SECRET') ??
       this.configService.get<string>('AUTH_TOKEN_SECRET');
     if (!secret) {
-      throw new UnauthorizedException('JWT_SECRET (or AUTH_TOKEN_SECRET) is not configured');
+      throw new UnauthorizedException(
+        'JWT_SECRET (or AUTH_TOKEN_SECRET) is not configured',
+      );
     }
     return createHmac('sha256', secret).update(value).digest('base64url');
   }

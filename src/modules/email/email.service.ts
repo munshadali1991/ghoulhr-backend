@@ -25,14 +25,14 @@ export class EmailService {
   async sendAdminCredentials(params: SendAdminCredentialsDto): Promise<void> {
     // TODO: Replace with actual email sending logic
     // Example: Using nodemailer, sendgrid, aws ses, etc.
-    
+
     this.logger.log(
       `Sending admin credentials email to ${params.to} for organization "${params.organizationName}"`,
     );
     this.logger.log(`Login URL: https://${params.subdomain}.ghoulhr.com/login`);
     this.logger.log(`Email: ${params.email}`);
     this.logger.log(`Password: ${params.password}`);
-    
+
     // Future implementation example:
     // await this.mailerService.sendMail({
     //   to: params.to,
@@ -51,15 +51,17 @@ export class EmailService {
   /**
    * Send employee credentials email when a new employee is onboarded
    */
-  async sendEmployeeCredentials(params: SendEmployeeCredentialsDto): Promise<void> {
+  async sendEmployeeCredentials(
+    params: SendEmployeeCredentialsDto,
+  ): Promise<void> {
     // TODO: Replace with actual email sending logic
-    
+
     this.logger.log(
       `Sending employee credentials email to ${params.to} for organization "${params.organizationName}"`,
     );
     this.logger.log(`Email: ${params.email}`);
     this.logger.log(`Password: ${params.password}`);
-    
+
     // Future implementation example:
     // await this.mailerService.sendMail({
     //   to: params.to,

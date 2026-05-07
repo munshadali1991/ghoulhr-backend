@@ -38,8 +38,6 @@ import { SettingsModule } from './settings/settings.module';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer
-      .apply(TenantResolverMiddleware)
-      .forRoutes('*'); // apply globally
+    consumer.apply(TenantResolverMiddleware).forRoutes('*'); // apply globally
   }
 }

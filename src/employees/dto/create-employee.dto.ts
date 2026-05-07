@@ -177,9 +177,13 @@ export class ChangePasswordDto {
   @IsString()
   @IsNotEmpty()
   @MinLength(12)
-  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]{12,}$/, {
-    message: 'Password must contain uppercase, lowercase, number, and special character',
-  })
+  @Matches(
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]{12,}$/,
+    {
+      message:
+        'Password must contain uppercase, lowercase, number, and special character',
+    },
+  )
   newPassword: string;
 }
 

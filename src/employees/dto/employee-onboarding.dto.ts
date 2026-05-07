@@ -182,6 +182,41 @@ export class OnboardingEmploymentDto {
   costCenter?: string;
 }
 
+export class OnboardingExperienceDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  previousCompanyName?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  previousDesignation?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(80)
+  totalExperienceYears?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  lastDrawnCtc?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  experienceSummary?: string;
+}
+
 export class OnboardingPayrollDto {
   @ApiPropertyOptional()
   @IsOptional()
@@ -338,7 +373,9 @@ export class OnboardingEmergencyContactDto {
   @MaxLength(200)
   contactName?: string;
 
-  @ApiPropertyOptional({ description: 'Phone number (digits / spaces / leading +)' })
+  @ApiPropertyOptional({
+    description: 'Phone number (digits / spaces / leading +)',
+  })
   @IsOptional()
   @Transform(emptyStringToUndefined)
   @IsString()
@@ -346,7 +383,10 @@ export class OnboardingEmergencyContactDto {
   @MaxLength(32)
   contactPhone?: string;
 
-  @ApiPropertyOptional({ example: 'Spouse', description: 'Relationship to the employee' })
+  @ApiPropertyOptional({
+    example: 'Spouse',
+    description: 'Relationship to the employee',
+  })
   @IsOptional()
   @Transform(emptyStringToUndefined)
   @IsString()
@@ -375,7 +415,9 @@ export class OnboardingAccessDto {
   @IsBoolean()
   mfaEnabled?: boolean;
 
-  @ApiPropertyOptional({ description: 'If omitted, a secure temporary password is generated' })
+  @ApiPropertyOptional({
+    description: 'If omitted, a secure temporary password is generated',
+  })
   @IsOptional()
   @Transform(emptyStringToUndefined)
   @IsString()
@@ -399,6 +441,12 @@ export class EmployeeOnboardingCreateDto {
   @ValidateNested()
   @Type(() => OnboardingPayrollDto)
   payroll?: OnboardingPayrollDto;
+
+  @ApiPropertyOptional({ type: OnboardingExperienceDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => OnboardingExperienceDto)
+  experience?: OnboardingExperienceDto;
 
   @ApiPropertyOptional({ type: OnboardingBankDto })
   @IsOptional()

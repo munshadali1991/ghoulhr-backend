@@ -4,7 +4,10 @@ import { Employee } from '../employee.entity';
 
 @Entity('employee_audit_logs')
 export class EmployeeAuditLog extends BaseEntity {
-  @ManyToOne(() => Employee, (e) => e.auditLogs, { onDelete: 'SET NULL', nullable: true })
+  @ManyToOne(() => Employee, (e) => e.auditLogs, {
+    onDelete: 'SET NULL',
+    nullable: true,
+  })
   @JoinColumn({ name: 'employeeId' })
   employee?: Employee | null;
 

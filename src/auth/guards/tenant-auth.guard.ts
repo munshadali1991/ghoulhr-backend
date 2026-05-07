@@ -1,4 +1,10 @@
-import { Injectable, CanActivate, ExecutionContext, UnauthorizedException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  UnauthorizedException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { Request } from 'express';
 import { AuthService } from '../auth.service';
 import { AuthTokenPayload } from '../auth.types';
@@ -25,7 +31,7 @@ export class TenantAuthGuard implements CanActivate {
     }
 
     const user = this.authService.verifyAccessToken(token);
-    
+
     // Attach user to request
     request.user = user;
 

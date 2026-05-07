@@ -17,19 +17,21 @@ export class TenantConnectionManager implements OnModuleDestroy {
   async getOrCreateConnection(org: Organization): Promise<DataSource> {
     const dbName = org.dbName;
     if (!dbName) {
-      throw new Error(`Organization ${org.id} does not have a tenant database configured`);
+      throw new Error(
+        `Organization ${org.id} does not have a tenant database configured`,
+      );
     }
 
     // Return cached connection if exists
     if (this.connections.has(dbName)) {
-      return this.connections.get(dbName)!;
+      return this.connections.get(dbName);
     }
 
     // Prevent race conditions with locking
     if (this.lock.has(dbName)) {
       await this.lock.get(dbName);
       if (this.connections.has(dbName)) {
-        return this.connections.get(dbName)!;
+        return this.connections.get(dbName);
       }
     }
 
@@ -60,7 +62,7 @@ export class TenantConnectionManager implements OnModuleDestroy {
 
     try {
       await masterDataSource.initialize();
-      
+
       // Check if database exists
       const result = await masterDataSource.query(
         'SELECT 1 FROM pg_database WHERE datname = $1',
@@ -100,7 +102,7 @@ export class TenantConnectionManager implements OnModuleDestroy {
 
     try {
       await masterDataSource.initialize();
-      
+
       // Terminate all connections to the database
       await masterDataSource.query(
         `SELECT pg_terminate_backend(pg_stat_activity.pid)
@@ -139,9 +141,13 @@ export class TenantConnectionManager implements OnModuleDestroy {
     const dbName = org.dbName;
     const dbHost = org.dbHost || this.configService.get<string>('DB_HOST');
     const dbUser = org.dbUser || this.configService.get<string>('DB_USER');
-    const dbPassword = org.dbPassword || this.configService.get<string>('DB_PASS');
+    const dbPassword =
+      org.dbPassword || this.configService.get<string>('DB_PASS');
     const dbPort = parseInt(this.configService.get<string>('DB_PORT'), 10);
-    const poolSize = parseInt(this.configService.get<string>('TENANT_CONNECTION_POOL_SIZE') || '10', 10);
+    const poolSize = parseInt(
+      this.configService.get<string>('TENANT_CONNECTION_POOL_SIZE') || '10',
+      10,
+    );
 
     const dataSource = new DataSource({
       type: 'postgres',
@@ -175,8 +181,8 @@ export class TenantConnectionManager implements OnModuleDestroy {
    */
   async onModuleDestroy() {
     this.logger.log('Closing all tenant database connections...');
-    const closePromises = Array.from(this.connections.values()).map((dataSource) =>
-      dataSource.destroy(),
+    const closePromises = Array.from(this.connections.values()).map(
+      (dataSource) => dataSource.destroy(),
     );
     await Promise.all(closePromises);
     this.connections.clear();

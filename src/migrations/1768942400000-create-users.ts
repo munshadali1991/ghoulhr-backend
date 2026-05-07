@@ -19,7 +19,9 @@ export class CreateUsers1768942400000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`ALTER TABLE "users" DROP CONSTRAINT "FK_users_organization"`);
+    await queryRunner.query(
+      `ALTER TABLE "users" DROP CONSTRAINT "FK_users_organization"`,
+    );
     await queryRunner.query(`DROP TABLE "users"`);
     await queryRunner.query(`DROP TYPE "public"."users_status_enum"`);
     await queryRunner.query(`DROP TYPE "public"."users_role_enum"`);

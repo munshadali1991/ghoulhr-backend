@@ -4,7 +4,9 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * employee_audit_logs was created without BaseEntity columns (updatedAt, deletedAt).
  * TypeORM inserts them → "column does not exist" and HR onboarding failed.
  */
-export class FixEmployeeAuditLogsBaseColumns1773000000000 implements MigrationInterface {
+export class FixEmployeeAuditLogsBaseColumns1773000000000
+  implements MigrationInterface
+{
   name = 'FixEmployeeAuditLogsBaseColumns1773000000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

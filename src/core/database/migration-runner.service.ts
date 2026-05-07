@@ -11,7 +11,9 @@ export class MigrationRunnerService {
    */
   async runMigrations(dataSource: DataSource): Promise<void> {
     try {
-      this.logger.log(`Running migrations on database: ${dataSource.options.database}`);
+      this.logger.log(
+        `Running migrations on database: ${dataSource.options.database}`,
+      );
 
       // Use TypeORM's built-in migration runner
       await dataSource.runMigrations();
@@ -28,13 +30,18 @@ export class MigrationRunnerService {
    */
   async revertLastMigration(dataSource: DataSource): Promise<void> {
     try {
-      this.logger.log(`Reverting last migration on database: ${dataSource.options.database}`);
+      this.logger.log(
+        `Reverting last migration on database: ${dataSource.options.database}`,
+      );
 
       await dataSource.undoLastMigration();
 
       this.logger.log('Last migration reverted successfully');
     } catch (error) {
-      this.logger.error(`Migration revert failed: ${error.message}`, error.stack);
+      this.logger.error(
+        `Migration revert failed: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
@@ -45,9 +52,14 @@ export class MigrationRunnerService {
   async showMigrationStatus(dataSource: DataSource): Promise<void> {
     try {
       const migrations = await dataSource.showMigrations();
-      this.logger.log(`Migrations status: ${migrations ? 'Pending' : 'All up to date'}`);
+      this.logger.log(
+        `Migrations status: ${migrations ? 'Pending' : 'All up to date'}`,
+      );
     } catch (error) {
-      this.logger.error(`Failed to get migration status: ${error.message}`, error.stack);
+      this.logger.error(
+        `Failed to get migration status: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }

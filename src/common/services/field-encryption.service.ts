@@ -1,4 +1,9 @@
-import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  randomBytes,
+  createHash,
+} from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
@@ -16,7 +21,9 @@ export class FieldEncryptionService {
     if (hex && hex.length === 64) {
       this.key = Buffer.from(hex, 'hex');
     } else {
-      const fallback = this.configService.get<string>('JWT_SECRET') || 'dev-only-key-change-me';
+      const fallback =
+        this.configService.get<string>('JWT_SECRET') ||
+        'dev-only-key-change-me';
       this.key = createHash('sha256').update(fallback).digest();
       this.logger.warn(
         'FIELD_ENCRYPTION_KEY not set (64 hex chars). Deriving key from JWT_SECRET — set FIELD_ENCRYPTION_KEY in production.',
@@ -28,9 +35,17 @@ export class FieldEncryptionService {
     if (plain == null || plain === '') return null;
     const iv = randomBytes(12);
     const cipher = createCipheriv('aes-256-gcm', this.key, iv);
-    const encrypted = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+    const encrypted = Buffer.concat([
+      cipher.update(plain, 'utf8'),
+      cipher.final(),
+    ]);
     const tag = cipher.getAuthTag();
-    return ['v1', iv.toString('base64'), tag.toString('base64'), encrypted.toString('base64')].join(':');
+    return [
+      'v1',
+      iv.toString('base64'),
+      tag.toString('base64'),
+      encrypted.toString('base64'),
+    ].join(':');
   }
 
   decrypt(payload: string | null | undefined): string | null {

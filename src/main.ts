@@ -78,7 +78,12 @@ async function bootstrap() {
     },
     credentials: true,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-bootstrap-admin-key', 'x-org-id'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'x-bootstrap-admin-key',
+      'x-org-id',
+    ],
   });
   app.useGlobalPipes(
     new ValidationPipe({
@@ -96,7 +101,8 @@ async function bootstrap() {
         type: 'http',
         scheme: 'bearer',
         bearerFormat: 'JWT',
-        description: 'Optional: Bearer token for tooling. Production clients use HttpOnly cookies.',
+        description:
+          'Optional: Bearer token for tooling. Production clients use HttpOnly cookies.',
       },
       'bearer',
     )

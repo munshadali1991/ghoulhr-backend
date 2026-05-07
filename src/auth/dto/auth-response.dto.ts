@@ -23,7 +23,8 @@ export class AuthResponseDto {
   user: AuthUserDto;
 
   @ApiPropertyOptional({
-    description: 'Deprecated: access and refresh tokens are issued as HttpOnly cookies on the API host.',
+    description:
+      'Deprecated: access and refresh tokens are issued as HttpOnly cookies on the API host.',
   })
   accessToken?: string;
 }

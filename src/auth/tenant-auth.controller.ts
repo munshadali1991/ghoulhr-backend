@@ -1,6 +1,12 @@
 import { Body, Controller, Post, Req, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
-import { ApiTags, ApiOperation, ApiBearerAuth, ApiBody, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiBearerAuth,
+  ApiBody,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { TenantAuthService } from './tenant-auth.service';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from '../employees/dto/create-employee.dto';
@@ -32,10 +38,16 @@ export class TenantAuthController {
       req.tenantDataSource,
       req.organization,
     );
-    this.authCookieService.attachAuthCookies(res, result.accessToken, result.refreshPlain);
+    this.authCookieService.attachAuthCookies(
+      res,
+      result.accessToken,
+      result.refreshPlain,
+    );
     return {
       user: result.user,
-      ...(result.requiresPasswordChange ? { requiresPasswordChange: true } : {}),
+      ...(result.requiresPasswordChange
+        ? { requiresPasswordChange: true }
+        : {}),
     };
   }
 
@@ -45,7 +57,10 @@ export class TenantAuthController {
   @ApiOperation({ summary: 'Change employee password' })
   @ApiBody({ type: ChangePasswordDto })
   @ApiResponse({ status: 200, description: 'Password changed successfully' })
-  @ApiResponse({ status: 400, description: 'New password does not meet requirements' })
+  @ApiResponse({
+    status: 400,
+    description: 'New password does not meet requirements',
+  })
   @ApiResponse({ status: 401, description: 'Current password incorrect' })
   async changePassword(
     @Req() req: TenantRequest,
@@ -54,7 +69,7 @@ export class TenantAuthController {
     return this.tenantAuthService.changePassword(
       req.user?.sub || '',
       dto,
-      req.tenantDataSource!,
+      req.tenantDataSource,
     );
   }
 }

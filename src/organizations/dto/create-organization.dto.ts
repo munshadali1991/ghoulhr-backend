@@ -1,4 +1,11 @@
-import { IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, Matches } from 'class-validator';
+import {
+  IsEnum,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Matches,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { OrganizationStatus } from '../organization-status.enum';
 
@@ -12,11 +19,15 @@ export class CreateOrganizationDto {
   @IsString()
   @IsNotEmpty()
   @Matches(/^[a-z0-9-]+$/, {
-    message: 'subdomain can only contain lowercase letters, numbers, and hyphens',
+    message:
+      'subdomain can only contain lowercase letters, numbers, and hyphens',
   })
   subdomain: string;
 
-  @ApiPropertyOptional({ enum: OrganizationStatus, default: OrganizationStatus.ACTIVE })
+  @ApiPropertyOptional({
+    enum: OrganizationStatus,
+    default: OrganizationStatus.ACTIVE,
+  })
   @IsOptional()
   @IsEnum(OrganizationStatus)
   status?: OrganizationStatus;

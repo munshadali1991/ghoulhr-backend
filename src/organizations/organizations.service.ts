@@ -1,4 +1,9 @@
-import { Injectable, ConflictException, NotFoundException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  NotFoundException,
+  Logger,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Not, Repository } from 'typeorm';
 import { randomBytes, scryptSync } from 'crypto';
@@ -82,16 +87,22 @@ export class OrganizationsService {
       this.logger.log(`Tenant database created: ${dbName}`);
 
       // Step 3: Run migrations on tenant database
-      const tenantDataSource = await this.tenantConnectionManager.getOrCreateConnection(
-        savedOrganization,
-      );
+      const tenantDataSource =
+        await this.tenantConnectionManager.getOrCreateConnection(
+          savedOrganization,
+        );
       await this.migrationRunner.runMigrations(tenantDataSource);
 
       this.logger.log(`Migrations completed on tenant database: ${dbName}`);
 
-      const adminEmail = (savedOrganization.adminEmail || '').trim().toLowerCase();
+      const adminEmail = (savedOrganization.adminEmail || '')
+        .trim()
+        .toLowerCase();
       if (adminEmail) {
-        const adminProvisioned = await this.ensureOrgAdminExists(savedOrganization, adminEmail);
+        const adminProvisioned = await this.ensureOrgAdminExists(
+          savedOrganization,
+          adminEmail,
+        );
         if (adminProvisioned) {
           await this.emailService.sendAdminCredentials({
             to: adminEmail,
@@ -144,7 +155,9 @@ export class OrganizationsService {
   }
 
   findAllActive() {
-    return this.organizationRepo.find({ where: { status: OrganizationStatus.ACTIVE } });
+    return this.organizationRepo.find({
+      where: { status: OrganizationStatus.ACTIVE },
+    });
   }
 
   findBySubdomain(subdomain: string) {
@@ -166,7 +179,9 @@ export class OrganizationsService {
       return;
     }
 
-    this.logger.log(`Bootstrapping runtime for ${organizations.length} organizations`);
+    this.logger.log(
+      `Bootstrapping runtime for ${organizations.length} organizations`,
+    );
 
     for (const organization of organizations) {
       try {
@@ -229,7 +244,8 @@ export class OrganizationsService {
 
     if (missingTenantCredentials && saved.dbName) {
       await this.tenantConnectionManager.createDatabase(saved.dbName);
-      const tenantDataSource = await this.tenantConnectionManager.getOrCreateConnection(saved);
+      const tenantDataSource =
+        await this.tenantConnectionManager.getOrCreateConnection(saved);
       await this.migrationRunner.runMigrations(tenantDataSource);
     }
 
@@ -298,10 +314,12 @@ export class OrganizationsService {
       }
     });
 
-    const organizationGrowth = Array.from(growthMap.entries()).map(([month, count]) => ({
-      month,
-      count,
-    }));
+    const organizationGrowth = Array.from(growthMap.entries()).map(
+      ([month, count]) => ({
+        month,
+        count,
+      }),
+    );
 
     return {
       totalOrganizations,
@@ -327,11 +345,17 @@ export class OrganizationsService {
     }
 
     const normalized = value.trim().toLowerCase();
-    return normalized.length === 0 || normalized === 'null' || normalized === 'undefined';
+    return (
+      normalized.length === 0 ||
+      normalized === 'null' ||
+      normalized === 'undefined'
+    );
   }
 
   private async getNextOrgPort(): Promise<number> {
-    const configuredStart = Number(this.configService.get<string>('ORG_PORT_START'));
+    const configuredStart = Number(
+      this.configService.get<string>('ORG_PORT_START'),
+    );
     const basePort =
       Number.isFinite(configuredStart) && configuredStart > 0
         ? configuredStart
@@ -350,7 +374,9 @@ export class OrganizationsService {
     return Math.max(currentMax + 1, basePort);
   }
 
-  private async ensureOrganizationRuntimeReady(organization: Organization): Promise<void> {
+  private async ensureOrganizationRuntimeReady(
+    organization: Organization,
+  ): Promise<void> {
     let next = organization;
     let changed = false;
 
@@ -382,8 +408,9 @@ export class OrganizationsService {
       );
     }
 
-    await this.tenantConnectionManager.createDatabase(next.dbName as string);
-    const tenantDataSource = await this.tenantConnectionManager.getOrCreateConnection(next);
+    await this.tenantConnectionManager.createDatabase(next.dbName);
+    const tenantDataSource =
+      await this.tenantConnectionManager.getOrCreateConnection(next);
     await this.migrationRunner.runMigrations(tenantDataSource);
 
     const adminEmail = (next.adminEmail || '').trim().toLowerCase();
@@ -426,8 +453,12 @@ export class OrganizationsService {
     });
 
     try {
-      const tenantDataSource = await this.tenantConnectionManager.getOrCreateConnection(organization);
-      const existingEmployee = await this.employeesService.findByEmail(adminEmail, tenantDataSource);
+      const tenantDataSource =
+        await this.tenantConnectionManager.getOrCreateConnection(organization);
+      const existingEmployee = await this.employeesService.findByEmail(
+        adminEmail,
+        tenantDataSource,
+      );
       if (!existingEmployee) {
         // Create ORG_ADMIN employee in tenant database
         await this.employeesService.create(

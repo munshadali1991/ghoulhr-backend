@@ -1,4 +1,8 @@
-import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { AuthCookieService } from './auth-cookie.service';
@@ -53,7 +57,9 @@ export class AuthRefreshService {
         this.authCookieService.clearAuthCookies(res);
         throw new UnauthorizedException('User no longer valid');
       }
-      const organization = await this.organizationsService.findById(user.organizationId);
+      const organization = await this.organizationsService.findById(
+        user.organizationId,
+      );
       if (!organization) {
         throw new UnauthorizedException('Organization not found');
       }
@@ -68,14 +74,20 @@ export class AuthRefreshService {
       if (!session.employeeId || !session.organizationId) {
         throw new UnauthorizedException('Invalid refresh session');
       }
-      const organization = await this.organizationsService.findById(session.organizationId);
+      const organization = await this.organizationsService.findById(
+        session.organizationId,
+      );
       if (!organization) {
         await this.refreshSessionService.revokeSession(session.id);
         this.authCookieService.clearAuthCookies(res);
         throw new UnauthorizedException('Organization not found');
       }
-      const tenantDs = await this.tenantConnectionManager.getOrCreateConnection(organization);
-      const employee = await this.employeesService.findById(session.employeeId, tenantDs);
+      const tenantDs =
+        await this.tenantConnectionManager.getOrCreateConnection(organization);
+      const employee = await this.employeesService.findById(
+        session.employeeId,
+        tenantDs,
+      );
       if (
         !employee ||
         employee.status === EmployeeStatus.TERMINATED ||
@@ -98,7 +110,8 @@ export class AuthRefreshService {
       throw new UnauthorizedException('Invalid refresh session');
     }
 
-    const { plain: newRefreshPlain } = await this.refreshSessionService.rotateSession(session, refreshExpires);
+    const { plain: newRefreshPlain } =
+      await this.refreshSessionService.rotateSession(session, refreshExpires);
     this.authCookieService.attachAuthCookies(res, accessToken, newRefreshPlain);
     return { ok: true };
   }
