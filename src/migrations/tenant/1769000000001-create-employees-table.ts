@@ -4,12 +4,10 @@ export class CreateEmployeesTable1769000000001 implements MigrationInterface {
   name = 'CreateEmployeesTable1769000000001';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    // Create enum for employee role
     await queryRunner.query(
-      `CREATE TYPE "public"."employees_role_enum" AS ENUM('ADMIN', 'EMPLOYEE', 'MANAGER', 'HR')`,
+      `CREATE TYPE "employees_role_enum" AS ENUM('ADMIN', 'EMPLOYEE', 'MANAGER', 'HR')`,
     );
 
-    // Create employees table
     await queryRunner.query(`
             CREATE TABLE "employees" (
                 "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
@@ -19,7 +17,7 @@ export class CreateEmployeesTable1769000000001 implements MigrationInterface {
                 "globalUserId" character varying NOT NULL,
                 "name" character varying NOT NULL,
                 "email" character varying NOT NULL,
-                "role" "public"."employees_role_enum" NOT NULL DEFAULT 'EMPLOYEE',
+                "role" "employees_role_enum" NOT NULL DEFAULT 'EMPLOYEE',
                 "department" character varying,
                 "designation" character varying,
                 "employeeId" character varying,
@@ -41,7 +39,6 @@ export class CreateEmployeesTable1769000000001 implements MigrationInterface {
             )
         `);
 
-    // Create indexes
     await queryRunner.query(
       `CREATE INDEX "IDX_employees_globalUserId" ON "employees" ("globalUserId")`,
     );
@@ -51,14 +48,11 @@ export class CreateEmployeesTable1769000000001 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    // Drop indexes
     await queryRunner.query(`DROP INDEX "IDX_employees_email"`);
     await queryRunner.query(`DROP INDEX "IDX_employees_globalUserId"`);
 
-    // Drop table
     await queryRunner.query(`DROP TABLE "employees"`);
 
-    // Drop enum
-    await queryRunner.query(`DROP TYPE "public"."employees_role_enum"`);
+    await queryRunner.query(`DROP TYPE "employees_role_enum"`);
   }
 }

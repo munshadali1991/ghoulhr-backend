@@ -9,6 +9,7 @@ import {
   MinLength,
   Matches,
   ValidateIf,
+  IsUUID,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -30,15 +31,15 @@ export class CreateEmployeeDto {
   @IsEnum(EmployeeRole)
   role?: EmployeeRole;
 
-  @ApiProperty({ example: 'Engineering', required: false })
+  @ApiProperty({ example: 'a7f5d2fb-255b-45e4-90ef-fc8d469f4c5f', required: false })
   @IsOptional()
-  @IsString()
-  department?: string;
+  @IsUUID()
+  departmentId?: string;
 
-  @ApiProperty({ example: 'Software Engineer', required: false })
+  @ApiProperty({ example: '47f9376b-9d76-4fae-8f7e-b7ceb0e3a922', required: false })
   @IsOptional()
-  @IsString()
-  designation?: string;
+  @IsUUID()
+  designationId?: string;
 
   @ApiProperty({ example: '+91-9876543210', required: false })
   @IsOptional()
@@ -141,10 +142,16 @@ export class EmployeeResponseDto {
   role: EmployeeRole;
 
   @ApiProperty()
-  department?: string;
+  departmentName?: string;
 
   @ApiProperty()
-  designation?: string;
+  designationName?: string;
+
+  @ApiProperty()
+  departmentId?: string;
+
+  @ApiProperty()
+  designationId?: string;
 
   @ApiProperty()
   status: string;

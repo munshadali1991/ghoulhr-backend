@@ -2,7 +2,7 @@ import { Entity, Column, JoinColumn, OneToOne } from 'typeorm';
 import { BaseEntity } from '../../database/base.entity';
 import { Employee } from '../employee.entity';
 
-@Entity('employee_access_control')
+@Entity({ name: 'employee_access_control' })
 export class EmployeeAccessControl extends BaseEntity {
   @OneToOne(() => Employee, (e) => e.accessControl, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'employeeId' })

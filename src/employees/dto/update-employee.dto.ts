@@ -8,6 +8,7 @@ import {
   IsString,
   MaxLength,
   MinLength,
+  IsUUID,
 } from 'class-validator';
 import { EmployeeRole, EmployeeStatus } from '../employee.entity';
 
@@ -34,15 +35,15 @@ export class UpdateEmployeeDto {
   @IsEnum(EmployeeStatus)
   status?: EmployeeStatus;
 
-  @ApiPropertyOptional({ example: 'Engineering' })
+  @ApiPropertyOptional({ example: 'a7f5d2fb-255b-45e4-90ef-fc8d469f4c5f' })
   @IsOptional()
-  @IsString()
-  department?: string;
+  @IsUUID()
+  departmentId?: string;
 
-  @ApiPropertyOptional({ example: 'Software Engineer' })
+  @ApiPropertyOptional({ example: '47f9376b-9d76-4fae-8f7e-b7ceb0e3a922' })
   @IsOptional()
-  @IsString()
-  designation?: string;
+  @IsUUID()
+  designationId?: string;
 
   @ApiPropertyOptional({ example: '+91-9876543210' })
   @IsOptional()

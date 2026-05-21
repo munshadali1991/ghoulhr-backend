@@ -1,10 +1,9 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class UpdateEmployeeTableForAuth1714000000000
+export class UpdateEmployeeTableForAuth1769000000002
   implements MigrationInterface
 {
   public async up(queryRunner: QueryRunner): Promise<void> {
-    // Add new columns
     await queryRunner.query(`
       ALTER TABLE employees
       ADD COLUMN IF NOT EXISTS "employeeCode" VARCHAR(50),
@@ -21,24 +20,20 @@ export class UpdateEmployeeTableForAuth1714000000000
       ADD COLUMN IF NOT EXISTS "updatedBy" UUID
     `);
 
-    // Convert dateOfBirth and dateOfJoining from VARCHAR to DATE
     await queryRunner.query(`
       ALTER TABLE employees
       ALTER COLUMN "dateOfBirth" TYPE DATE USING "dateOfBirth"::DATE,
       ALTER COLUMN "dateOfJoining" TYPE DATE USING "dateOfJoining"::DATE
     `);
 
-    // Drop globalUserId column (no longer needed)
     await queryRunner.query(`
       ALTER TABLE employees DROP COLUMN IF EXISTS "globalUserId"
     `);
 
-    // Drop employeeId column (replaced by employeeCode)
     await queryRunner.query(`
       ALTER TABLE employees DROP COLUMN IF EXISTS "employeeId"
     `);
 
-    // Update role enum values
     await queryRunner.query(`
       ALTER TABLE employees
       ALTER COLUMN "role" TYPE VARCHAR(50)
@@ -62,14 +57,12 @@ export class UpdateEmployeeTableForAuth1714000000000
       CREATE INDEX IF NOT EXISTS "IDX_EMPLOYEE_STATUS" ON "employees" ("status")
     `);
 
-    // Set default password for existing employees (they'll need to reset)
     await queryRunner.query(`
       UPDATE employees
       SET "password" = 'TEMP_PASSWORD_REQUIRES_RESET'
       WHERE "password" = '' OR "password" IS NULL
     `);
 
-    // Set createdBy to a default value for existing records
     await queryRunner.query(`
       UPDATE employees
       SET "createdBy" = '00000000-0000-0000-0000-000000000000'
@@ -78,27 +71,23 @@ export class UpdateEmployeeTableForAuth1714000000000
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    // Drop indexes
     await queryRunner.query(`DROP INDEX IF EXISTS "IDX_EMPLOYEE_CODE_UNIQUE"`);
     await queryRunner.query(`DROP INDEX IF EXISTS "IDX_EMPLOYEE_EMAIL"`);
     await queryRunner.query(`DROP INDEX IF EXISTS "IDX_EMPLOYEE_ROLE"`);
     await queryRunner.query(`DROP INDEX IF EXISTS "IDX_EMPLOYEE_STATUS"`);
 
-    // Add back globalUserId and employeeId
     await queryRunner.query(`
       ALTER TABLE employees
       ADD COLUMN IF NOT EXISTS "globalUserId" UUID,
       ADD COLUMN IF NOT EXISTS "employeeId" VARCHAR(50)
     `);
 
-    // Convert dates back to VARCHAR
     await queryRunner.query(`
       ALTER TABLE employees
       ALTER COLUMN "dateOfBirth" TYPE VARCHAR(50),
       ALTER COLUMN "dateOfJoining" TYPE VARCHAR(50)
     `);
 
-    // Drop new columns
     await queryRunner.query(`
       ALTER TABLE employees
       DROP COLUMN IF EXISTS "employeeCode",

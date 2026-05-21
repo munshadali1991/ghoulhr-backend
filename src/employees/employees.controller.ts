@@ -74,6 +74,7 @@ export class EmployeesController {
       dto,
       req.tenantDataSource,
       actorSub,
+      req.organization?.id,
     );
     return {
       employee: {
@@ -82,8 +83,10 @@ export class EmployeesController {
         name: result.employee.name,
         email: result.employee.email,
         role: result.employee.role,
-        department: result.employee.department,
-        designation: result.employee.designation,
+        departmentName: result.departmentName,
+        designationName: result.designationName,
+        departmentId: result.employee.departmentId,
+        designationId: result.employee.designationId,
         status: result.employee.status,
         dateOfJoining: result.employee.dateOfJoining,
         createdAt: result.employee.createdAt,
@@ -116,6 +119,7 @@ export class EmployeesController {
       dto,
       req.tenantDataSource,
       actorSub,
+      req.organization?.id,
     );
   }
 
@@ -151,6 +155,7 @@ export class EmployeesController {
       dto,
       req.tenantDataSource,
       req.user?.sub || '', // createdBy employee ID
+      req.organization?.id,
     );
 
     return {
@@ -160,8 +165,10 @@ export class EmployeesController {
         name: result.employee.name,
         email: result.employee.email,
         role: result.employee.role,
-        department: result.employee.department,
-        designation: result.employee.designation,
+        departmentName: result.departmentName,
+        designationName: result.designationName,
+        departmentId: result.employee.departmentId,
+        designationId: result.employee.designationId,
         status: result.employee.status,
         dateOfJoining: result.employee.dateOfJoining,
         createdAt: result.employee.createdAt,
@@ -214,6 +221,7 @@ export class EmployeesController {
       dto,
       req.tenantDataSource,
       req.user?.sub || '',
+      req.organization?.id,
     );
   }
 }

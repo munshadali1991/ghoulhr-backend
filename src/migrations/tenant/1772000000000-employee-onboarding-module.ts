@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 /**
- * Modular onboarding storage: core employees extended + satellite tables.
+ * Modular onboarding storage: employees extended + satellite tables.
  * New tenants run this after base employee table exists.
  */
 export class EmployeeOnboardingModule1772000000000

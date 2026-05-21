@@ -15,6 +15,8 @@ import {
   UpdateEmployeeSettingsDto,
   UpdateAttendanceSettingsDto,
 } from './dto/create-setting.dto';
+import { UpdateLocationConfigurationsDto } from './dto/location-configuration.dto';
+import { UpdateLeaveConfigurationsDto } from './dto/leave-configuration.dto';
 import { TenantAuthGuard } from '../auth/guards/tenant-auth.guard';
 import type { TenantRequest } from '../common/middleware/tenant-resolver.middleware';
 
@@ -49,7 +51,10 @@ export class SettingsController {
   @Get('employee')
   @ApiOperation({ summary: 'Get employee settings' })
   async getEmployeeSettings(@Req() req: TenantRequest) {
-    return this.settingsService.getEmployeeSettings(req.tenantDataSource);
+    return this.settingsService.getEmployeeSettings(
+      req.tenantDataSource,
+      req.organization?.id,
+    );
   }
 
   @Post('employee')
@@ -61,6 +66,7 @@ export class SettingsController {
     const updates = await this.settingsService.updateEmployeeSettings(
       dto,
       req.tenantDataSource,
+      req.organization?.id,
     );
     return { message: 'Employee settings updated successfully', updates };
   }
@@ -68,7 +74,10 @@ export class SettingsController {
   @Get('attendance')
   @ApiOperation({ summary: 'Get attendance settings' })
   async getAttendanceSettings(@Req() req: TenantRequest) {
-    return this.settingsService.getAttendanceSettings(req.tenantDataSource);
+    return this.settingsService.getAttendanceSettings(
+      req.tenantDataSource,
+      req.organization?.id,
+    );
   }
 
   @Post('attendance')
@@ -80,8 +89,65 @@ export class SettingsController {
     const updates = await this.settingsService.updateAttendanceSettings(
       dto,
       req.tenantDataSource,
+      req.organization?.id,
     );
     return { message: 'Attendance settings updated successfully', updates };
+  }
+
+  @Get('locations')
+  @ApiOperation({ summary: 'List branch / location configurations for the organization' })
+  async getLocationConfigurations(@Req() req: TenantRequest) {
+    return this.settingsService.getLocationConfigurations(
+      req.tenantDataSource,
+      req.organization?.id,
+    );
+  }
+
+  @Post('locations')
+  @ApiOperation({ summary: 'Replace branch / location configurations for the organization' })
+  async updateLocationConfigurations(
+    @Req() req: TenantRequest,
+    @Body() dto: UpdateLocationConfigurationsDto,
+  ) {
+    const result = await this.settingsService.updateLocationConfigurations(
+      dto,
+      req.tenantDataSource,
+      req.organization?.id,
+    );
+    return {
+      message: 'Location configurations updated successfully',
+      ...result,
+    };
+  }
+
+  @Get('leave-config')
+  @ApiOperation({
+    summary: 'List leave type master rows (per branch) for the organization',
+  })
+  async getLeaveConfigurations(@Req() req: TenantRequest) {
+    return this.settingsService.getLeaveConfigurations(
+      req.tenantDataSource,
+      req.organization?.id,
+    );
+  }
+
+  @Post('leave-config')
+  @ApiOperation({
+    summary: 'Replace leave type master rows for the organization',
+  })
+  async updateLeaveConfigurations(
+    @Req() req: TenantRequest,
+    @Body() dto: UpdateLeaveConfigurationsDto,
+  ) {
+    const result = await this.settingsService.updateLeaveConfigurations(
+      dto,
+      req.tenantDataSource,
+      req.organization?.id,
+    );
+    return {
+      message: 'Leave configurations updated successfully',
+      ...result,
+    };
   }
 
   // General routes (come after specific routes)

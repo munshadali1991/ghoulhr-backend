@@ -22,25 +22,16 @@ import { EmployeeDocument } from './entities/employee-document.entity';
 import { EmployeeAccessControl } from './entities/employee-access.entity';
 import { EmployeeAuditLog } from './entities/employee-audit-log.entity';
 import { EmployeeEmergencyContact } from './entities/employee-emergency-contact.entity';
-
-interface EmployeeDepartmentSetting {
-  id: string;
-  name: string;
-  code?: string;
-  isActive: boolean;
-}
-
-interface EmployeeDesignationSetting {
-  id: string;
-  name: string;
-  departmentIds: string[];
-  isActive: boolean;
-}
+import { Department } from './entities/department.entity';
+import { Designation } from './entities/designation.entity';
+import { DesignationDepartment } from './entities/designation-department.entity';
 
 export interface CreateEmployeeResult {
   employee: Employee;
   temporaryPassword: string;
   passwordExpiresAt: Date;
+  departmentName?: string;
+  designationName?: string;
 }
 
 @Injectable()
@@ -60,6 +51,7 @@ export class EmployeesService {
     dto: CreateEmployeeDto,
     dataSource: DataSource,
     createdBy: string,
+    organizationId?: string,
   ): Promise<CreateEmployeeResult> {
     const repo = dataSource.getRepository(Employee);
 
@@ -70,18 +62,17 @@ export class EmployeesService {
 
     // Step 2: Fetch employee settings
     const employeeSettings =
-      await this.settingsService.getEmployeeSettings(dataSource);
+      await this.settingsService.getEmployeeSettings(dataSource, organizationId);
     this.logger.log(
       `Employee settings loaded: ${JSON.stringify(employeeSettings)}`,
     );
 
     // Step 3: Validate required fields from settings
     await this.validateRequiredFields(dto, employeeSettings);
-    this.validateDepartmentAndDesignation(
-      dto.department,
-      dto.designation,
-      employeeSettings.departments,
-      employeeSettings.designations,
+    const departmentMapping = await this.validateDepartmentAndDesignation(
+      dto.departmentId,
+      dto.designationId,
+      dataSource,
     );
 
     // Step 4: Check email uniqueness
@@ -115,13 +106,14 @@ export class EmployeesService {
     // Step 7: Create employee record
     const employee = repo.create({
       employeeCode,
+      organizationId,
       name: dto.name,
       email,
       password: hashedPassword,
       role: dto.role || EmployeeRole.EMPLOYEE,
       status: EmployeeStatus.PENDING_ACTIVATION,
-      department: dto.department,
-      designation: dto.designation,
+      departmentId: dto.departmentId,
+      designationId: dto.designationId,
       phoneNumber: dto.phoneNumber,
       dateOfBirth: dto.dateOfBirth,
       dateOfJoining: dto.dateOfJoining,
@@ -151,6 +143,8 @@ export class EmployeesService {
       employee: savedEmployee,
       temporaryPassword,
       passwordExpiresAt,
+      departmentName: departmentMapping?.departmentName,
+      designationName: departmentMapping?.designationName,
     };
   }
 
@@ -196,6 +190,7 @@ export class EmployeesService {
     dto: EmployeeOnboardingCreateDto,
     dataSource: DataSource,
     actorId: string,
+    organizationId?: string,
   ): Promise<CreateEmployeeResult> {
     const actorUuid = this.requireActorUuid(actorId);
     const {
@@ -225,7 +220,7 @@ export class EmployeesService {
     }
 
     const employeeSettings =
-      await this.settingsService.getEmployeeSettings(dataSource);
+      await this.settingsService.getEmployeeSettings(dataSource, organizationId);
     const fullName = [basic.firstName, basic.middleName, basic.lastName]
       .filter(Boolean)
       .join(' ')
@@ -236,17 +231,16 @@ export class EmployeesService {
         name: fullName,
         email: loginEmail,
         phoneNumber: basic.mobileNumber,
-        department: employment.department,
-        designation: employment.designation,
+        departmentId: employment.departmentId,
+        designationId: employment.designationId,
         dateOfJoining: employment.dateOfJoining,
       } as CreateEmployeeDto,
       employeeSettings,
     );
-    this.validateDepartmentAndDesignation(
-      employment.department,
-      employment.designation,
-      employeeSettings.departments,
-      employeeSettings.designations,
+    const departmentMapping = await this.validateDepartmentAndDesignation(
+      employment.departmentId,
+      employment.designationId,
+      dataSource,
     );
 
     if (
@@ -307,13 +301,14 @@ export class EmployeesService {
         const empRepo = em.getRepository(Employee);
         const emp = empRepo.create({
           employeeCode,
+          organizationId,
           name: fullName,
           email: loginEmail,
           password: hashedPassword,
           role,
           status: EmployeeStatus.PENDING_ACTIVATION,
-          department: employment.department,
-          designation: employment.designation,
+          departmentId: employment.departmentId,
+          designationId: employment.designationId,
           phoneNumber: basic.mobileNumber,
           dateOfBirth: basic.dateOfBirth,
           dateOfJoining: employment.dateOfJoining,
@@ -523,6 +518,7 @@ export class EmployeesService {
     dto: EmployeeOnboardingCreateDto,
     dataSource: DataSource,
     actorId: string,
+    organizationId?: string,
   ): Promise<Employee> {
     const actorUuid = this.requireActorUuid(actorId);
     const employeeRepo = dataSource.getRepository(Employee);
@@ -553,6 +549,11 @@ export class EmployeesService {
     }
 
     const role = this.mapPortalRoleToEmployeeRole(access.portalRoleLabel || 'EMPLOYEE');
+    const departmentMapping = await this.validateDepartmentAndDesignation(
+      employment.departmentId,
+      employment.designationId,
+      dataSource,
+    );
     const personalEmail = (
       basic.personalEmail?.trim() ||
       existingEmployee.personalEmail ||
@@ -575,11 +576,12 @@ export class EmployeesService {
       const savedEmployee = await empRepo.save(
         empRepo.create({
           ...existingEmployee,
+          organizationId: organizationId ?? existingEmployee.organizationId,
           name: fullName,
           email: loginEmail,
           role,
-          department: employment.department,
-          designation: employment.designation,
+          departmentId: employment.departmentId,
+          designationId: employment.designationId,
           phoneNumber: basic.mobileNumber,
           dateOfBirth: basic.dateOfBirth,
           dateOfJoining: employment.dateOfJoining,
@@ -790,10 +792,10 @@ export class EmployeesService {
           if (!dto.phoneNumber) missingFields.push('phoneNumber');
           break;
         case 'department':
-          if (!dto.department) missingFields.push('department');
+          if (!dto.departmentId) missingFields.push('departmentId');
           break;
         case 'position':
-          if (!dto.designation) missingFields.push('designation');
+          if (!dto.designationId) missingFields.push('designationId');
           break;
         case 'hire_date':
           if (!dto.dateOfJoining) missingFields.push('dateOfJoining');
@@ -808,71 +810,49 @@ export class EmployeesService {
     }
   }
 
-  private validateDepartmentAndDesignation(
-    department: string | undefined,
-    designation: string | undefined,
-    rawDepartments: unknown,
-    rawDesignations: unknown,
-  ): void {
-    const selectedDepartment = department?.trim();
-    const selectedDesignation = designation?.trim();
-    if (!selectedDepartment && !selectedDesignation) {
-      return;
+  private async validateDepartmentAndDesignation(
+    departmentId: string | undefined,
+    designationId: string | undefined,
+    dataSource: DataSource,
+  ): Promise<{ departmentName: string; designationName: string } | null> {
+    if (!departmentId && !designationId) {
+      return null;
     }
-
-    const departments = Array.isArray(rawDepartments)
-      ? (rawDepartments as EmployeeDepartmentSetting[])
-      : [];
-    const designations = Array.isArray(rawDesignations)
-      ? (rawDesignations as EmployeeDesignationSetting[])
-      : [];
-
-    // Backward compatibility: if master data is not configured, do not block onboarding.
-    if (departments.length === 0 || designations.length === 0) {
-      return;
-    }
-
-    if (!selectedDepartment || !selectedDesignation) {
+    if (!departmentId || !designationId) {
       throw new BadRequestException(
-        'Department and designation must both be provided when employee masters are configured.',
+        'departmentId and designationId must be provided together.',
       );
     }
 
-    const matchedDepartment = departments.find(
-      (d) =>
-        d?.isActive &&
-        typeof d?.name === 'string' &&
-        d.name.trim().toLowerCase() === selectedDepartment.toLowerCase(),
-    );
+    const departmentRepo = dataSource.getRepository(Department);
+    const designationRepo = dataSource.getRepository(Designation);
+    const mappingRepo = dataSource.getRepository(DesignationDepartment);
 
-    if (!matchedDepartment) {
+    const [department, designation] = await Promise.all([
+      departmentRepo.findOne({ where: { id: departmentId } }),
+      designationRepo.findOne({ where: { id: designationId } }),
+    ]);
+
+    if (!department || !department.isActive) {
       throw new BadRequestException(
-        `Department "${selectedDepartment}" is not available for this organization.`,
+        `Department "${departmentId}" is not available for this organization.`,
+      );
+    }
+    if (!designation || !designation.isActive) {
+      throw new BadRequestException(
+        `Designation "${designationId}" is not available for this organization.`,
       );
     }
 
-    const matchedDesignation = designations.find(
-      (d) =>
-        d?.isActive &&
-        typeof d?.name === 'string' &&
-        d.name.trim().toLowerCase() === selectedDesignation.toLowerCase(),
-    );
-
-    if (!matchedDesignation) {
+    const mapping = await mappingRepo.findOne({
+      where: { departmentId, designationId },
+    });
+    if (!mapping) {
       throw new BadRequestException(
-        `Designation "${selectedDesignation}" is not available for this organization.`,
+        `Designation "${designation.name}" is not mapped to department "${department.name}".`,
       );
     }
-
-    const allowedDepartmentIds = Array.isArray(matchedDesignation.departmentIds)
-      ? matchedDesignation.departmentIds
-      : [];
-
-    if (!allowedDepartmentIds.includes(matchedDepartment.id)) {
-      throw new BadRequestException(
-        `Designation "${selectedDesignation}" is not mapped to department "${selectedDepartment}".`,
-      );
-    }
+    return { departmentName: department.name, designationName: designation.name };
   }
 
   /**
@@ -984,24 +964,29 @@ export class EmployeesService {
   /**
    * Find all employees in tenant database
    */
-  async findAll(dataSource: DataSource): Promise<Employee[]> {
+  async findAll(dataSource: DataSource): Promise<Record<string, unknown>[]> {
     const repo = dataSource.getRepository(Employee);
-    return repo.find({
-      order: { createdAt: 'DESC' },
-      select: [
-        'id',
-        'employeeCode',
-        'name',
-        'email',
-        'role',
-        'status',
-        'department',
-        'designation',
-        'phoneNumber',
-        'dateOfJoining',
-        'createdAt',
-      ],
-    });
+    return repo
+      .createQueryBuilder('e')
+      .leftJoin(Department, 'd', 'd.id = e.departmentId')
+      .leftJoin(Designation, 'z', 'z.id = e.designationId')
+      .select([
+        'e.id AS id',
+        'e.employeeCode AS "employeeCode"',
+        'e.name AS name',
+        'e.email AS email',
+        'e.role AS role',
+        'e.status AS status',
+        'e.departmentId AS "departmentId"',
+        'e.designationId AS "designationId"',
+        'd.name AS "departmentName"',
+        'z.name AS "designationName"',
+        'e.phoneNumber AS "phoneNumber"',
+        'e.dateOfJoining AS "dateOfJoining"',
+        'e.createdAt AS "createdAt"',
+      ])
+      .orderBy('e.createdAt', 'DESC')
+      .getRawMany();
   }
 
   async updateEmployee(
@@ -1009,9 +994,13 @@ export class EmployeesService {
     dto: UpdateEmployeeDto,
     dataSource: DataSource,
     actorId: string,
+    organizationId?: string,
   ): Promise<Employee> {
     const repo = dataSource.getRepository(Employee);
     const employee = await repo.findOne({ where: { id: employeeId } });
+    if (organizationId) {
+      employee.organizationId = organizationId;
+    }
     if (!employee) {
       throw new BadRequestException('Employee not found');
     }
@@ -1028,8 +1017,15 @@ export class EmployeesService {
     if (dto.name != null) employee.name = dto.name.trim();
     if (dto.role != null) employee.role = dto.role;
     if (dto.status != null) employee.status = dto.status;
-    if (dto.department !== undefined) employee.department = dto.department || undefined;
-    if (dto.designation !== undefined) employee.designation = dto.designation || undefined;
+    if (dto.departmentId !== undefined || dto.designationId !== undefined) {
+      await this.validateDepartmentAndDesignation(
+        dto.departmentId ?? employee.departmentId,
+        dto.designationId ?? employee.designationId,
+        dataSource,
+      );
+      employee.departmentId = dto.departmentId ?? employee.departmentId;
+      employee.designationId = dto.designationId ?? employee.designationId;
+    }
     if (dto.phoneNumber !== undefined) employee.phoneNumber = dto.phoneNumber || undefined;
     if (dto.dateOfJoining !== undefined) employee.dateOfJoining = dto.dateOfJoining || undefined;
     if (

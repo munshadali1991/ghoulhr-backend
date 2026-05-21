@@ -1,5 +1,15 @@
-import { Entity, Column, Index, OneToOne, OneToMany } from 'typeorm';
+import {
+  Entity,
+  Column,
+  Index,
+  OneToOne,
+  OneToMany,
+  ManyToOne,
+  JoinColumn,
+} from 'typeorm';
 import { BaseEntity } from '../database/base.entity';
+import { Department } from './entities/department.entity';
+import { Designation } from './entities/designation.entity';
 
 export enum EmployeeRole {
   ORG_ADMIN = 'ORG_ADMIN',
@@ -14,8 +24,12 @@ export enum EmployeeStatus {
   PENDING_ACTIVATION = 'PENDING_ACTIVATION',
 }
 
-@Entity('employees')
+@Entity({ name: 'employees' })
 export class Employee extends BaseEntity {
+  @Column({ type: 'uuid', nullable: true })
+  @Index()
+  organizationId?: string;
+
   @Column()
   @Index({ unique: true })
   employeeCode: string;
@@ -46,11 +60,21 @@ export class Employee extends BaseEntity {
   @Index()
   status: EmployeeStatus;
 
-  @Column({ nullable: true })
-  department?: string;
+  @Column({ type: 'uuid', nullable: true })
+  @Index()
+  departmentId?: string;
 
-  @Column({ nullable: true })
-  designation?: string;
+  @ManyToOne(() => Department, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'departmentId' })
+  departmentRef?: Department;
+
+  @Column({ type: 'uuid', nullable: true })
+  @Index()
+  designationId?: string;
+
+  @ManyToOne(() => Designation, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'designationId' })
+  designationRef?: Designation;
 
   @Column({ nullable: true })
   phoneNumber?: string;

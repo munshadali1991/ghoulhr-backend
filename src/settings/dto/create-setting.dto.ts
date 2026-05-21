@@ -212,7 +212,8 @@ export class ShiftTimeValidConstraint implements ValidatorConstraintInterface {
       const startMinutes = startH * 60 + startM;
       const endMinutes = endH * 60 + endM;
 
-      if (startMinutes >= endMinutes) {
+      // Same clock time is invalid; end < start is allowed (overnight, e.g. 16:00–01:00).
+      if (startMinutes === endMinutes) {
         return false;
       }
     }
@@ -220,7 +221,7 @@ export class ShiftTimeValidConstraint implements ValidatorConstraintInterface {
   }
 
   defaultMessage() {
-    return 'Each shift must have start_time before end_time';
+    return 'Shift start and end times must be different';
   }
 }
 
@@ -237,6 +238,14 @@ export function ShiftTimeValid(validationOptions?: ValidationOptions) {
 }
 
 export class ShiftDto {
+  @ApiProperty({
+    example: '2e381f46-c73e-474c-b6cb-79ca3b280511',
+    required: false,
+  })
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+
   @ApiProperty({ example: 'Morning Shift' })
   @IsString()
   @IsNotEmpty()
@@ -263,6 +272,15 @@ export class ShiftDto {
   @IsNumber()
   @Min(0)
   break_minutes?: number;
+
+  @ApiProperty({
+    description:
+      'FK to locations_configurations (branch). Multiple shifts may share the same location.',
+    example: '5dc8f7bc-ecf1-459b-8a1b-2e6a5d7d0eb4',
+    name: 'locationId',
+  })
+  @IsUUID()
+  locationId: string;
 }
 
 export class UpdateAttendanceSettingsDto {
@@ -285,7 +303,7 @@ export class UpdateAttendanceSettingsDto {
   @ValidateNested({ each: true })
   @Type(() => ShiftDto)
   @ShiftTimeValid({
-    message: 'Each shift must have start_time before end_time',
+    message: 'Shift start and end times must be different',
   })
   shifts?: ShiftDto[];
 

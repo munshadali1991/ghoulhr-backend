@@ -122,13 +122,15 @@ export class OnboardingEmploymentDto {
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsString()
-  department?: string;
+  @Transform(emptyStringToUndefined)
+  @IsUUID()
+  departmentId?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsString()
-  designation?: string;
+  @Transform(emptyStringToUndefined)
+  @IsUUID()
+  designationId?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
