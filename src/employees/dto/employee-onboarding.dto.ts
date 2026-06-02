@@ -112,12 +112,6 @@ export class OnboardingEmploymentDto {
   @IsOptional()
   @Transform(emptyStringToUndefined)
   @IsUUID()
-  reportingManagerId?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @Transform(emptyStringToUndefined)
-  @IsUUID()
   hrManagerId?: string;
 
   @ApiPropertyOptional()

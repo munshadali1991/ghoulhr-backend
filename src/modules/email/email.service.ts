@@ -15,6 +15,16 @@ export interface SendEmployeeCredentialsDto {
   password: string;
 }
 
+export interface SendLeaveAppliedNotificationDto {
+  to: string;
+  recipientName: string;
+  applicantName: string;
+  leaveType: string;
+  startDate: string;
+  endDate: string;
+  body: string;
+}
+
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
@@ -73,5 +83,19 @@ export class EmailService {
     //     password: params.password,
     //   },
     // });
+  }
+
+  /**
+   * Notify an employee that a colleague applied for leave (Cc / org-wide).
+   */
+  async sendLeaveAppliedNotification(
+    params: SendLeaveAppliedNotificationDto,
+  ): Promise<void> {
+    this.logger.log(
+      `Leave Cc notification to ${params.to} (${params.recipientName}): ${params.body}`,
+    );
+    this.logger.log(
+      `Applicant: ${params.applicantName}, type: ${params.leaveType}, ${params.startDate} – ${params.endDate}`,
+    );
   }
 }

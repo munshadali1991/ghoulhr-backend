@@ -20,6 +20,11 @@ export const SETTING_KEYS = {
   ATTENDANCE_TRACKING_MODE: 'attendance.tracking_mode',
   ATTENDANCE_GEO_FENCING_ENABLED: 'attendance.geo_fencing_enabled',
   ATTENDANCE_ALLOWED_IPS: 'attendance.allowed_ip_addresses',
+  TIMESHEET_MAX_HOURS_PER_DAY: 'timesheet.max_hours_per_day',
+  TIMESHEET_MAX_PAST_DAYS: 'timesheet.max_past_days',
+  TIMESHEET_REQUIRE_SUBMISSION_BY_EOD: 'timesheet.require_submission_by_eod',
+  TIMESHEET_EMPLOYEE_HELPER_TEXT: 'timesheet.employee_helper_text',
+  TIMESHEET_WEEK_STARTS_ON: 'timesheet.week_starts_on',
 } as const;
 
 export const SUPPORTED_CURRENCIES = ['INR', 'USD', 'EUR', 'GBP'] as const;

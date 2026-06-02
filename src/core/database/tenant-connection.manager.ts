@@ -162,6 +162,7 @@ export class TenantConnectionManager implements OnModuleDestroy {
         __dirname + '/../../employees/*.entity{.ts,.js}',
         __dirname + '/../../employees/entities/*.entity{.ts,.js}',
         __dirname + '/../../settings/entities/*.entity{.ts,.js}',
+        __dirname + '/../../ess/entities/*.entity{.ts,.js}',
       ],
       migrations: [__dirname + '/../../migrations/tenant/*.js'],
       extra: {

@@ -3,8 +3,10 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
+  Query,
   UseGuards,
   Req,
   Logger,
@@ -12,6 +14,9 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { EmployeesService } from './employees.service';
+import { ReportingManagersService } from './reporting-managers.service';
+import { AssignReportingManagerDto } from './dto/assign-reporting-manager.dto';
+import { ListReportingManagersQueryDto } from './dto/list-reporting-managers-query.dto';
 import {
   CreateEmployeeDto,
   CreateEmployeeResponseDto,
@@ -35,7 +40,10 @@ import type { TenantRequest } from '../common/middleware/tenant-resolver.middlew
 export class EmployeesController {
   private readonly logger = new Logger(EmployeesController.name);
 
-  constructor(private readonly employeesService: EmployeesService) {}
+  constructor(
+    private readonly employeesService: EmployeesService,
+    private readonly reportingManagersService: ReportingManagersService,
+  ) {}
 
   @Get()
   @Roles(EmployeeRole.ORG_ADMIN, EmployeeRole.MANAGER)
@@ -121,6 +129,58 @@ export class EmployeesController {
       actorSub,
       req.organization?.id,
     );
+  }
+
+  @Get('reporting-managers')
+  @Roles(EmployeeRole.ORG_ADMIN, EmployeeRole.MANAGER)
+  @ApiOperation({ summary: 'List employees with active reporting manager assignments' })
+  async listReportingManagers(
+    @Req() req: TenantRequest,
+    @Query() query: ListReportingManagersQueryDto,
+  ) {
+    return this.reportingManagersService.listAssignments(
+      req.tenantDataSource,
+      query,
+    );
+  }
+
+  @Get(':id/reporting-manager')
+  @Roles(EmployeeRole.ORG_ADMIN, EmployeeRole.MANAGER)
+  @ApiOperation({ summary: 'Get active reporting manager for an employee' })
+  async getReportingManager(
+    @Req() req: TenantRequest,
+    @Param('id') id: string,
+  ) {
+    return this.reportingManagersService.getAssignmentForEmployee(
+      req.tenantDataSource,
+      id,
+    );
+  }
+
+  @Post(':id/reporting-manager')
+  @Roles(EmployeeRole.ORG_ADMIN)
+  @ApiOperation({ summary: 'Assign or change primary reporting manager' })
+  async assignReportingManager(
+    @Req() req: TenantRequest,
+    @Param('id') id: string,
+    @Body() dto: AssignReportingManagerDto,
+  ) {
+    return this.reportingManagersService.assignOrChange(
+      req.tenantDataSource,
+      id,
+      dto,
+    );
+  }
+
+  @Delete(':id/reporting-manager')
+  @Roles(EmployeeRole.ORG_ADMIN)
+  @ApiOperation({ summary: 'Remove active reporting manager assignment' })
+  async removeReportingManager(
+    @Req() req: TenantRequest,
+    @Param('id') id: string,
+  ) {
+    await this.reportingManagersService.remove(req.tenantDataSource, id);
+    return { message: 'Reporting manager removed' };
   }
 
   @Get(':id')

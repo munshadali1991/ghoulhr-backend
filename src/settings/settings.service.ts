@@ -22,6 +22,8 @@ import { LocationConfiguration } from '../employees/entities/location-configurat
 import { UpdateLocationConfigurationsDto } from './dto/location-configuration.dto';
 import { LeaveConfiguration } from './entities/leave-configuration.entity';
 import { UpdateLeaveConfigurationsDto } from './dto/leave-configuration.dto';
+import { UpdateTimesheetSettingsDto } from './dto/timesheet-settings.dto';
+import { DEFAULT_TIMESHEET_SETTINGS } from './timesheet-settings.defaults';
 
 /** Serialize entity timestamps for JSON responses. */
 function toIsoTimestamp(value: Date | string | null | undefined): string | undefined {
@@ -743,6 +745,11 @@ export class SettingsService {
           !Number.isNaN(Number(item.supportingDocumentAfterDays))
             ? Math.round(Number(item.supportingDocumentAfterDays))
             : null;
+        const maxConsecutive =
+          item.maxConsecutiveDays != null &&
+          !Number.isNaN(Number(item.maxConsecutiveDays))
+            ? Math.round(Number(item.maxConsecutiveDays))
+            : null;
         const workflow =
           Array.isArray(item.approvalWorkflow) && item.approvalWorkflow.length > 0
             ? item.approvalWorkflow
@@ -762,6 +769,7 @@ export class SettingsService {
             encashmentAllowed: item.encashmentAllowed ?? false,
             negativeBalanceAllowed: item.negativeBalanceAllowed ?? false,
             supportingDocumentAfterDays: docAfter,
+            maxConsecutiveDays: maxConsecutive,
             weekendsCountAsLeave: item.weekendsCountAsLeave ?? false,
             holidaysCountAsLeave: item.holidaysCountAsLeave ?? false,
             approvalWorkflow: workflow,
@@ -807,6 +815,8 @@ export class SettingsService {
         row.supportingDocumentAfterDays != null
           ? Number(row.supportingDocumentAfterDays)
           : undefined,
+      maxConsecutiveDays:
+        row.maxConsecutiveDays != null ? Number(row.maxConsecutiveDays) : undefined,
       weekendsCountAsLeave: row.weekendsCountAsLeave ?? false,
       holidaysCountAsLeave: row.holidaysCountAsLeave ?? false,
       approvalWorkflow: workflow,
@@ -844,5 +854,56 @@ export class SettingsService {
     }
 
     return shifts[0] as ShiftDto;
+  }
+
+  async getTimesheetSettings(
+    dataSource: DataSource,
+  ): Promise<Record<string, unknown>> {
+    const allSettings = await this.getAllSettings(dataSource);
+    const mapping: Record<string, string> = {
+      [SETTING_KEYS.TIMESHEET_MAX_HOURS_PER_DAY]: 'max_hours_per_day',
+      [SETTING_KEYS.TIMESHEET_MAX_PAST_DAYS]: 'max_past_days',
+      [SETTING_KEYS.TIMESHEET_REQUIRE_SUBMISSION_BY_EOD]:
+        'require_submission_by_eod',
+      [SETTING_KEYS.TIMESHEET_EMPLOYEE_HELPER_TEXT]: 'employee_helper_text',
+      [SETTING_KEYS.TIMESHEET_WEEK_STARTS_ON]: 'week_starts_on',
+    };
+
+    const result: Record<string, unknown> = {
+      ...DEFAULT_TIMESHEET_SETTINGS,
+    };
+
+    for (const setting of allSettings) {
+      const field = mapping[setting.key];
+      if (field) {
+        result[field] = setting.value;
+      }
+    }
+
+    return result;
+  }
+
+  async updateTimesheetSettings(
+    dto: UpdateTimesheetSettingsDto,
+    dataSource: DataSource,
+  ): Promise<Record<string, unknown>> {
+    const updates: Record<string, unknown> = {};
+    const mapping: Record<string, string> = {
+      max_hours_per_day: SETTING_KEYS.TIMESHEET_MAX_HOURS_PER_DAY,
+      max_past_days: SETTING_KEYS.TIMESHEET_MAX_PAST_DAYS,
+      require_submission_by_eod: SETTING_KEYS.TIMESHEET_REQUIRE_SUBMISSION_BY_EOD,
+      employee_helper_text: SETTING_KEYS.TIMESHEET_EMPLOYEE_HELPER_TEXT,
+      week_starts_on: SETTING_KEYS.TIMESHEET_WEEK_STARTS_ON,
+    };
+
+    for (const [field, key] of Object.entries(mapping)) {
+      if (dto[field as keyof UpdateTimesheetSettingsDto] !== undefined) {
+        const value = dto[field as keyof UpdateTimesheetSettingsDto];
+        await this.setSetting(key, value, dataSource);
+        updates[key] = value;
+      }
+    }
+
+    return { ...updates, ...(await this.getTimesheetSettings(dataSource)) };
   }
 }

@@ -15,9 +15,6 @@ export class EmployeeEmploymentDetail extends BaseEntity {
   employmentStatus?: string;
 
   @Column({ type: 'uuid', nullable: true })
-  reportingManagerId?: string;
-
-  @Column({ type: 'uuid', nullable: true })
   hrManagerId?: string;
 
   @Column({ nullable: true })

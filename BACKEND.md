@@ -2,289 +2,535 @@
 
 ## Overview
 
-The backend is a NestJS 11 multi-tenant HR API with:
-- master-level organization and user management
-- tenant-scoped employee and settings modules
-- cookie-first authentication with rotating refresh sessions
-- runtime tenant bootstrap (tenant DB provisioning + migrations)
+GhoulHR backend is a **NestJS 11** multi-tenant HR API with:
+
+- **Master database** — organizations, platform users (`users`), refresh sessions
+- **Per-tenant PostgreSQL databases** — employees, settings, HR onboarding artifacts
+- **Cookie-first authentication** — rotating refresh sessions (HttpOnly cookies + optional Bearer for tooling)
+- **Runtime tenant bootstrap** — tenant DB provisioning, migrations, org-port assignment, startup reconciliation
+
+Primary entry: `src/main.ts`  
+App wiring: `src/app.module.ts`
 
 ## Stack
 
-- NestJS 11 + TypeScript
-- TypeORM + PostgreSQL
-- class-validator + class-transformer
-- Swagger (`/api-docs`)
-- cookie-parser (HttpOnly auth cookies)
+| Layer | Technology |
+|-------|------------|
+| Framework | NestJS 11, TypeScript |
+| ORM / DB | TypeORM 0.3, PostgreSQL (`pg`) |
+| Validation | `class-validator`, `class-transformer` (global `ValidationPipe`) |
+| API docs | Swagger at `/api-docs` |
+| Config | `@nestjs/config` (`.env` / `.env.production`) |
+| Auth transport | `cookie-parser`, custom HS256 JWT (HMAC) |
 
-## Runtime Entry
+Node **≥ 20**, npm **≥ 10**.
 
-Primary entry: `src/main.ts`
+## Project Structure
 
-Current runtime behavior:
-- loads cookies via `cookie-parser`
-- enables JSON/urlencoded body limits (default `100mb`, env: `JSON_BODY_LIMIT`)
-- enables CORS with:
-  - explicit allowlist from `WEB_APP_ORIGINS` (comma-separated), or
-  - localhost / subdomain-localhost fallback checks
-- applies global `ValidationPipe` (`whitelist`, `forbidNonWhitelisted`, `transform`)
-- serves Swagger at `/api-docs`
-- conditionally enables trust proxy via `TRUST_PROXY` or production `NODE_ENV`
+```
+backend/ghoulhr-backend/
+├── src/
+│   ├── main.ts                    # HTTP bootstrap, CORS, Swagger, body limits
+│   ├── app.module.ts              # Root module + global tenant middleware
+│   ├── app.controller.ts          # GET / health
+│   ├── auth/                      # Platform + tenant auth, guards, refresh sessions
+│   ├── users/                     # Master users (SUPER_ADMIN, ORG_ADMIN, …)
+│   ├── organizations/           # Tenant lifecycle (SUPER_ADMIN)
+│   ├── employees/                 # Tenant employee CRUD + HR onboarding
+│   ├── settings/                  # Tenant org/employee/attendance/location/leave settings
+│   ├── roles/                     # Platform Role enum
+│   ├── database/                  # Master TypeORM config + BaseEntity
+│   ├── core/database/             # TenantConnectionManager, MigrationRunnerService
+│   ├── common/                    # Tenant middleware, password/encryption, @Roles
+│   ├── modules/email/             # Admin credential emails (stub / logs today)
+│   └── migrations/
+│       ├── *.ts                   # Master DB migrations (auto-run on boot)
+│       └── tenant/*.ts            # Tenant DB migrations (run on org create / CLI)
+├── proxy/domain-proxy.cjs         # Subdomain → org port reverse proxy
+├── scripts/                       # Tenant migration + PM2 sync helpers
+├── docs/                          # db-standards.md, tenant-data-dictionary.md
+├── ecosystem.base.config.js       # PM2: superadmin API + domain proxy
+└── test/                          # Jest unit/e2e
+```
 
-App root wiring: `src/app.module.ts`
-- imports:
-  - `DatabaseModule`
-  - `DatabaseCoreModule`
-  - `AuthModule`
-  - `UsersModule`
-  - `OrganizationsModule`
-  - `EmployeesModule`
-  - `SettingsModule`
-- applies `TenantResolverMiddleware` globally
+## Request Flow
 
-## Authentication
+```mermaid
+flowchart TD
+  A[HTTP Request] --> B{Path excluded?}
+  B -->|/auth, /api-docs, /health, …| C[Skip tenant resolution]
+  B -->|No| D[TenantResolverMiddleware]
+  D --> E{TENANT_LOCK_SUBDOMAIN?}
+  E -->|Yes| F[Force tenant]
+  E -->|No| G{Root host / localhost?}
+  G -->|Yes| C
+  G -->|No| H{Match orgPort?}
+  H -->|Yes| F
+  H -->|No| I{Subdomain → organization}
+  I -->|Found + ACTIVE| F
+  I -->|Missing| J[404 Tenant not found]
+  F --> K[Attach req.organization + req.tenantDataSource]
+  K --> L[Controller + Guards]
+  C --> L
+```
 
-### Model
+### Runtime bootstrap (`main.ts`)
 
-The backend uses HttpOnly cookies for auth flows:
-- access cookie (default `ghoulhr_access`)
-- refresh cookie (default `ghoulhr_refresh`)
+On listen:
 
-Bearer tokens are also accepted as a tooling fallback in guards.
+1. `cookie-parser`
+2. Optional `trust proxy` (`TRUST_PROXY=true` or `NODE_ENV=production`)
+3. JSON/urlencoded body limit — default `100mb` (`JSON_BODY_LIMIT`; HR onboarding sends base64 documents)
+4. CORS — `WEB_APP_ORIGINS` allowlist, else `localhost` / `*.localhost`
+5. Global `ValidationPipe` — `whitelist`, `forbidNonWhitelisted`, `transform`
+6. Swagger at `/api-docs` (Bearer documented as optional tooling fallback)
+7. Listen on `PORT` (default `3000`)
 
-### Token + Session Components
+### Application bootstrap (modules)
 
-- `src/auth/auth.service.ts`
-  - custom HS256 token mint/verify (`createHmac`)
-  - access token TTL from `JWT_ACCESS_EXPIRES_IN` or `JWT_EXPIRES_IN`
-  - tenant-aware register/login resolution
-- `src/auth/auth-cookie.service.ts`
-  - attaches/clears auth cookies
-  - cookie behavior configurable via:
-    - `COOKIE_SECURE`
-    - `COOKIE_SAMESITE`
-    - cookie-name envs
-- `src/auth/entities/refresh-session.entity.ts`
-  - persistent refresh session table (`refresh_sessions`)
-  - session kinds include `master` and `employee`
-- `src/auth/refresh-session.service.ts`
-  - issue / validate / rotate / revoke refresh sessions
-- `src/auth/auth-refresh.service.ts`
-  - `/auth/refresh` and `/auth/logout` logic
-- `src/auth/super-admin-bootstrap.service.ts`
-  - auto-calls `ensureDefaultSuperAdmin()` during application bootstrap
+Two `OnApplicationBootstrap` hooks run after the app starts:
 
-### Auth Endpoints
+| Service | Behavior |
+|---------|----------|
+| `SuperAdminBootstrapService` | `AuthService.ensureDefaultSuperAdmin()` — seeds default SUPER_ADMIN when configured and none exists |
+| `OrganizationRuntimeBootstrapService` | `OrganizationsService.ensureAllOrganizationsRuntimeReady()` — reconciles tenant DB connections/migrations for existing orgs |
 
-From `src/auth/auth.controller.ts`:
-- `GET /auth/session` -> resolves current user from access token
-- `POST /auth/refresh` -> rotates refresh session + reissues access cookie
-- `POST /auth/logout` -> revokes refresh + clears cookies
-- `POST /auth/register` -> tenant-aware register into users table
-- `POST /auth/login` -> login (tenant-first lookup with super-admin fallback)
-- `POST /auth/superadmin/bootstrap` -> bootstrap super-admin using bootstrap key
+## Multi-Tenancy
 
-From `src/auth/tenant-auth.controller.ts`:
-- `POST /auth/employee/login` -> employee login (tenant-aware)
-- `POST /auth/change-password` -> password change (guarded)
+### Master vs tenant
 
-### Guards
+| Store | Connection | Entities (examples) |
+|-------|------------|---------------------|
+| Master | `DatabaseModule` → `DB_NAME` | `organizations`, `users`, `refresh_sessions` |
+| Tenant | `TenantConnectionManager` per `organization.dbName` | `employees`, `organization_settings`, `departments`, … |
 
-- `AuthTokenGuard` (`src/auth/guards/auth-token.guard.ts`)
-  - reads access token from cookie or Bearer
-  - validates and sets `req.user`
-- `TenantAuthGuard` (`src/auth/guards/tenant-auth.guard.ts`)
-  - token validation + tenant-subdomain consistency checks
-- `RolesGuard` (`src/auth/guards/roles.guard.ts`)
-  - supports both platform `Role` and tenant `EmployeeRole`
+Master migrations run automatically at startup (`migrationsRun: true`, compiled `dist/src/migrations/*.js`).
 
-## Tenant Resolution
+Tenant migrations run when:
 
-Middleware: `src/common/middleware/tenant-resolver.middleware.ts`
+- A new organization is created (`OrganizationsService.create`)
+- Startup reconciliation (`ensureAllOrganizationsRuntimeReady`)
+- CLI: `npm run tenant:migrate`
 
-Applied globally and skipped for excluded paths:
-- `/auth`
-- `/api/auth`
-- `/api/super-admin`
-- `/api-docs`
-- `/health`
+### Tenant resolution
 
-Resolution flow:
-1. if `TENANT_LOCK_SUBDOMAIN` is set, force that tenant
-2. otherwise parse host/port
-3. if request port maps to `organization.orgPort`, bind that tenant
-4. otherwise parse subdomain and resolve organization by subdomain
-5. skip root domain / localhost root and skip `API_SUBDOMAIN`
-6. attach:
-   - `req.organization`
-   - `req.tenantDataSource` from `TenantConnectionManager`
+Middleware: `src/common/middleware/tenant-resolver.middleware.ts`  
+Applied globally via `AppModule.configure()`.
 
-The middleware rejects:
-- unknown tenant
-- non-active tenant
-- tenant database not available
+**Excluded paths** (no tenant binding):
 
-## Organizations Module
+- `/auth`, `/api/auth`, `/api/super-admin`, `/api-docs`, `/health`
 
-Key files:
-- `src/organizations/organizations.controller.ts`
-- `src/organizations/organizations.service.ts`
-- `src/organizations/organization-runtime-bootstrap.service.ts`
+**Resolution order:**
 
-### Controller routes (SUPER_ADMIN guarded)
+1. `TENANT_LOCK_SUBDOMAIN` — force single tenant (used for dedicated tenant API instances / PM2 per-org processes)
+2. Root domain / `localhost` without subdomain — skip (platform / super-admin)
+3. Host **port** matches `organization.orgPort` — bind tenant (local multi-port dev)
+4. **Subdomain** lookup in master DB — skip if subdomain equals `API_SUBDOMAIN` (default `api`)
+5. Attach `req.organization` and `req.tenantDataSource` via `TenantConnectionManager.getOrCreateConnection()`
 
-- `POST /organizations`
-- `GET /organizations`
-- `GET /organizations/dashboard/stats`
-- `GET /organizations/stats` (alias)
-- `GET /organizations/deleted`
-- `PATCH /organizations/id/:id`
-- `DELETE /organizations/id/:id`
-- `PATCH /organizations/id/:id/restore`
-- `GET /organizations/id/:id`
-- `GET /organizations/:subdomain`
+**Rejected cases:**
 
-### Service behavior highlights
+- Unknown subdomain → `404`
+- Non-`ACTIVE` organization → `403` suspended
+- Tenant DB connection failure → `404` database not available
 
-- creates tenant runtime metadata on org create:
-  - `dbName`, `dbHost`, `dbUser`, `dbPassword`, `orgPort`
-- provisions tenant DB + runs tenant migrations
-- rollback on failures:
-  - drops created tenant DB
-  - deletes master organization record
-- auto-provisions ORG_ADMIN user path when `adminEmail` exists
-- computes super-admin dashboard aggregates
-- startup bootstrap (`OrganizationRuntimeBootstrapService`) runs:
-  - `ensureAllOrganizationsRuntimeReady()`
+### Tenant connection pool
 
-## Employees Module
+`TenantConnectionManager` caches `DataSource` per `dbName`, uses per-org credentials (`dbHost`, `dbUser`, `dbPassword`) with env fallbacks, pool size from `TENANT_CONNECTION_POOL_SIZE` (default `10`).
 
-Key files:
-- `src/employees/employees.controller.ts`
-- `src/employees/employees.service.ts`
-- `src/employees/dto/employee-onboarding.dto.ts`
+Tenant entity globs (no `synchronize`):
 
-### Controller routes
+- `src/employees/**/*.entity.ts`
+- `src/settings/entities/*.entity.ts`
+- Migrations: `dist/src/migrations/tenant/*.js`
 
-All under `TenantAuthGuard + RolesGuard`:
-- `GET /employees` (ORG_ADMIN, MANAGER)
-- `GET /employees/:id` (ORG_ADMIN, MANAGER)
-- `POST /employees` (ORG_ADMIN)
-- `POST /employees/:id/reset-password` (ORG_ADMIN)
-- `POST /employees/check-duplicate` (ORG_ADMIN)
-- `POST /employees/hr-onboarding` (ORG_ADMIN)
+### Tenant schema layout
 
-### Current service capabilities
+Historically, migrations introduced PostgreSQL schemas (`core`, `master`, `feature`, `audit`, `config`). Migration `1776000000004-revert-to-public-schema` moves all tenant tables back to **`public`** for simpler TypeORM mapping. New and reconciled tenant DBs use a single `public` schema.
 
-- classic employee create with settings-aware validation
-- enterprise HR onboarding transaction:
-  - creates main employee row + related entities
-  - supports encrypted sensitive fields
-  - stores docs payload encrypted (`inline_base64` driver)
-  - writes audit row
-- duplicate checks for email and mobile
-- password reset / login attempt tracking / lockout hooks
-- employee code generation from settings:
-  - `employee.id_prefix`
-  - `employee.auto_generate_id`
+See also: `docs/tenant-data-dictionary.md`, `docs/db-standards.md`.
 
-## Settings Module
+## Modules
 
-Key files:
-- `src/settings/settings.controller.ts`
-- `src/settings/settings.service.ts`
-- `src/settings/settings.constants.ts`
+### App (health)
 
-### Controller routes
+| Method | Path | Auth | Notes |
+|--------|------|------|-------|
+| `GET` | `/` | None | Returns health string (`AppController`) |
 
-- `GET /settings/profile`
-- `POST /settings/profile`
-- `GET /settings/employee`
-- `POST /settings/employee`
-- `GET /settings/attendance`
-- `POST /settings/attendance`
-- `GET /settings`
-- `GET /settings/:key`
-- `POST /settings`
+`/health` is listed in tenant-middleware exclusions but is **not** implemented as a dedicated route today.
 
-Important: specific routes are defined before `:key`.
+---
 
-### Data model
+### Auth (`AuthModule` — global)
 
-Settings use key-value JSON (`organization_settings`) and map between:
-- internal keys (for example `org.date_format`, `attendance.shifts`)
-- frontend-friendly object shapes (for example `dateFormat`, `working_days`)
+Cookie names (defaults): `ghoulhr_access`, `ghoulhr_refresh`  
+Tokens: custom HS256 via `createHmac` in `AuthService`  
+Refresh: persisted in master `refresh_sessions` (`sessionKind`: `master` | `employee`)
 
-## Core Database Infrastructure
+#### Platform routes — `AuthController` (`/auth`)
 
-`src/database/*` and `src/core/database/*`
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/auth/session` | Current user from access cookie (or Bearer) |
+| `POST` | `/auth/refresh` | Rotate refresh session, re-issue access cookie |
+| `POST` | `/auth/logout` | Revoke refresh session, clear cookies |
+| `POST` | `/auth/register` | Register into master `users` (tenant-aware via middleware org) |
+| `POST` | `/auth/login` | Login — tenant user first, SUPER_ADMIN fallback on root |
+| `POST` | `/auth/superadmin/bootstrap` | First SUPER_ADMIN via `x-bootstrap-admin-key` |
 
-- `DatabaseModule`
-  - master TypeORM setup (`migrationsRun: true`)
-- `TenantConnectionManager`
-  - tenant datasource creation/caching
-  - create/drop tenant DB helpers
-- `MigrationRunnerService`
-  - executes tenant migrations against datasource
-- `DatabaseCoreModule`
-  - exports tenant connection + migration services
+Register/login/bootstrap responses set HttpOnly cookies; body returns `{ user }` only.
 
-## Security-Relevant Notes
+`POST /auth/register` — header `x-bootstrap-admin-key` required when assigning `SUPER_ADMIN`.
 
-- Auth is cookie-first; access token may still be read from Bearer for tooling.
-- Refresh sessions are persisted and rotated.
-- Tenant isolation is enforced by middleware tenant binding and tenant-aware guards.
-- Sensitive onboarding fields can be encrypted at rest via `FieldEncryptionService`.
-- Super-admin bootstrap remains protected by `BOOTSTRAP_ADMIN_KEY` on bootstrap endpoint.
+#### Tenant employee routes — `TenantAuthController` (`/auth`)
 
-## Environment Variables (Active/Important)
+Requires tenant middleware context for `employee/login`.
 
-- DB: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS`, `DB_NAME`, `DB_LOGGING`
-- Server/platform: `PORT`, `NODE_ENV`, `TRUST_PROXY`, `JSON_BODY_LIMIT`, `WEB_APP_ORIGINS`
-- Auth:
-  - `JWT_SECRET` (or fallback `AUTH_TOKEN_SECRET`)
-  - `JWT_ACCESS_EXPIRES_IN` / `JWT_EXPIRES_IN`
-  - `JWT_REFRESH_EXPIRES_IN`
-  - `AUTH_ACCESS_COOKIE_NAME`
-  - `AUTH_REFRESH_COOKIE_NAME`
-  - `COOKIE_SECURE`
-  - `COOKIE_SAMESITE`
-- Bootstrap:
-  - `BOOTSTRAP_ADMIN_KEY`
-  - `DEFAULT_SUPERADMIN_EMAIL`
-  - `DEFAULT_SUPERADMIN_PASSWORD`
-  - `DEFAULT_ORGANIZATION_NAME`
-  - `DEFAULT_ORGANIZATION_SUBDOMAIN`
-- Tenant/runtime:
-  - `TENANT_CONNECTION_POOL_SIZE`
-  - `TENANT_LOCK_SUBDOMAIN`
-  - `ORG_PORT_START`
-  - `API_SUBDOMAIN`
-- Security:
-  - `FIELD_ENCRYPTION_KEY`
+| Method | Path | Guard | Description |
+|--------|------|-------|-------------|
+| `POST` | `/auth/employee/login` | None | Employee login against tenant `employees` table |
+| `POST` | `/auth/change-password` | `TenantAuthGuard` | Change password for authenticated employee |
 
-## Scripts
+Employee login may return `requiresPasswordChange: true` when `mustChangePassword` is set.
 
-From `backend/ghoulhr-backend/package.json`:
-- `npm run build`
-- `npm run format`
-- `npm run start`
-- `npm run start:dev`
-- `npm run start:debug`
-- `npm run start:prod`
-- `npm run lint`
-- `npm run test`
-- `npm run test:watch`
-- `npm run test:cov`
-- `npm run test:debug`
-- `npm run test:e2e`
-- `npm run proxy:start`
-- `npm run pm2:start:base`
-- `npm run pm2:sync:orgs`
-- `npm run pm2:save`
-- `npm run tenant:migrate`
+#### Guards
+
+| Guard | File | Behavior |
+|-------|------|----------|
+| `AuthTokenGuard` | `auth/guards/auth-token.guard.ts` | Cookie or Bearer access token → `req.user` |
+| `TenantAuthGuard` | `auth/guards/tenant-auth.guard.ts` | Validates token; enforces `organizationSubdomain` match when `req.organization` present |
+| `RolesGuard` | `auth/guards/roles.guard.ts` | `@Roles()` — accepts platform `Role` or tenant `EmployeeRole` |
+
+---
+
+### Organizations (`OrganizationsModule`)
+
+**Guard:** `AuthTokenGuard` + `RolesGuard` + `@Roles(SUPER_ADMIN)` on controller.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/organizations` | Create org + tenant DB + migrations + optional ORG_ADMIN |
+| `GET` | `/organizations` | List all |
+| `GET` | `/organizations/dashboard/stats` | Super-admin dashboard aggregates |
+| `GET` | `/organizations/stats` | Alias for dashboard stats |
+| `GET` | `/organizations/deleted` | Soft-deleted orgs |
+| `PATCH` | `/organizations/id/:id` | Update |
+| `DELETE` | `/organizations/id/:id` | Soft delete |
+| `PATCH` | `/organizations/id/:id/restore` | Restore |
+| `GET` | `/organizations/id/:id` | By id |
+| `GET` | `/organizations/:subdomain` | By subdomain |
+
+**Create flow:**
+
+1. Insert master `organizations` row (`dbName`, `dbHost`, `dbUser`, `dbPassword`, `orgPort`)
+2. `CREATE DATABASE` for tenant
+3. Connect tenant DS + `MigrationRunnerService.runMigrations()`
+4. If `adminEmail` set — provision tenant ORG_ADMIN (`EmployeesService`) and log credentials via `EmailService` (stub)
+5. On failure — drop tenant DB + delete master row
+
+`orgPort` assigned from `ORG_PORT_START` (default range starts `6000`).  
+Default provisioned admin password: `admin@123` (until changed).
+
+---
+
+### Employees (`EmployeesModule`)
+
+**Guard:** `TenantAuthGuard` + `RolesGuard` on all routes.
+
+Route order matters: static segments (`check-duplicate`, `hr-onboarding`) are registered before `:id`.
+
+| Method | Path | Roles | Description |
+|--------|------|-------|-------------|
+| `GET` | `/employees` | ORG_ADMIN, MANAGER | List employees (enriched rows) |
+| `POST` | `/employees/check-duplicate` | ORG_ADMIN | Email / phone duplicate check |
+| `POST` | `/employees/hr-onboarding` | ORG_ADMIN | Modular HR onboarding (transaction) |
+| `PATCH` | `/employees/:id/hr-onboarding` | ORG_ADMIN | Update via onboarding payload |
+| `GET` | `/employees/:id` | ORG_ADMIN, MANAGER | Employee by id |
+| `POST` | `/employees` | ORG_ADMIN | Classic create (settings-aware validation) |
+| `POST` | `/employees/:id/reset-password` | ORG_ADMIN | Admin password reset |
+| `PATCH` | `/employees/:id` | ORG_ADMIN | Partial update (`UpdateEmployeeDto`) |
+
+#### HR onboarding (`createHrOnboarding` / `updateHrOnboarding`)
+
+Single DB transaction persists modular sections:
+
+| Section | Persistence |
+|---------|-------------|
+| Basic / employment | `employees` + `employee_employment_details` |
+| Experience | Fields on employment detail |
+| Payroll | `employee_salary_details` |
+| Bank | `employee_bank_details` (encrypted account number) |
+| Compliance | PAN/Aadhaar encrypted on `employees`; passport/UAN/PF/ESI plain columns |
+| Emergency contact | `employee_emergency_contacts` |
+| Documents | `employee_documents` — `storageDriver: inline_base64`, encrypted payload, max ~5MB each, max 20 files |
+| Access | `employee_access_control` (portal role label, HRMS flags) |
+| Audit | `employee_audit_logs` |
+
+Sensitive fields use `FieldEncryptionService` (`FIELD_ENCRYPTION_KEY`, fallback `JWT_SECRET` / `AUTH_TOKEN_SECRET`).
+
+Employee codes respect settings: `employee.id_prefix`, `employee.auto_generate_id`.
+
+Platform roles on employee: `ORG_ADMIN`, `MANAGER`, `EMPLOYEE` (`EmployeeRole` enum).
+
+---
+
+### Settings (`SettingsModule`)
+
+**Guard:** `TenantAuthGuard` on all routes.  
+Specific routes **must** precede `GET/POST :key` and `GET` (bare).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/settings/profile` | Org profile (key-value mapped to frontend shape) |
+| `POST` | `/settings/profile` | Update org profile |
+| `GET` | `/settings/employee` | Employee module settings + departments/designations |
+| `POST` | `/settings/employee` | Bulk update employee settings |
+| `GET` | `/settings/attendance` | Attendance settings + work shifts |
+| `POST` | `/settings/attendance` | Bulk update attendance; persists shifts to `work_shift_configurations` |
+| `GET` | `/settings/locations` | Branch / location configurations |
+| `POST` | `/settings/locations` | Replace location configurations |
+| `GET` | `/settings/leave-config` | Leave type master rows (per branch) |
+| `POST` | `/settings/leave-config` | Replace leave configurations |
+| `GET` | `/settings` | All `organization_settings` rows |
+| `GET` | `/settings/:key` | Single setting by internal key |
+| `POST` | `/settings` | Upsert `{ key, value }` |
+
+#### Setting keys (`settings.constants.ts`)
+
+| Area | Internal keys (examples) |
+|------|--------------------------|
+| Org profile | `org.name`, `org.logo`, `org.timezone`, `org.currency`, `org.date_format`, `org.language` |
+| Employee | `employee.id_prefix`, `employee.auto_generate_id`, `employee.required_fields`, `employee.default_probation_period`, `employee.departments`, `employee.designations` |
+| Attendance | `attendance.working_days`, `attendance.shifts` (legacy JSON; migrated to `work_shift_configurations`), grace/half-day/overtime/geo/IP settings |
+
+Normalized tables (also exposed via dedicated endpoints):
+
+- `departments`, `designations`, `designation_departments`
+- `locations_configurations`
+- `leave_configurations`
+- `work_shift_configurations` (linked to locations; managed through attendance settings APIs)
+- `organization_calendars`, `organization_calendar_holidays` (org holiday calendar module)
+
+#### Organization calendar (`OrganizationCalendarController`)
+
+| Method | Path | Role | Description |
+|--------|------|------|-------------|
+| `GET` | `/settings/organization/calendar?year=` | Tenant | Calendar metadata + holidays for year |
+| `POST` | `/settings/organization/calendar/holidays` | `ORG_ADMIN` | Add holiday |
+| `PATCH` | `/settings/organization/calendar/holidays/:id` | `ORG_ADMIN` | Update holiday |
+| `DELETE` | `/settings/organization/calendar/holidays/:id` | `ORG_ADMIN` | Soft-delete holiday |
+| `POST` | `/settings/organization/calendar/publish` | `ORG_ADMIN` | Publish calendar for year |
+
+---
+
+### ESS — Employee self-service (`EssModule`)
+
+**Guard:** `TenantAuthGuard` on all routes.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/ess/leave/balances?year=` | Per-type balances (`granted`, `consumed`, `pending`, `balance`) + policy `rules` |
+| `GET` | `/ess/leave/balances/:leaveConfigurationId?year=` | Detail: `summary` KPIs, `monthlyChart`, `transactions` ledger for one leave type |
+| `GET` | `/ess/leave/types` | Bookable leave types, approvers, `rules` |
+| `GET` | `/ess/leave/preview-days` | Preview leave days (respects weekends + published holidays) |
+| `GET` | `/ess/leave/requests?status=PENDING\|APPROVED` | Own requests for Pending / History tabs |
+| `POST` | `/ess/leave/requests` | Submit leave (transaction: `leave_requests` + `pendingDays`) |
+| `POST` | `/ess/leave/requests/:id/withdraw` | Withdraw pending request (reverts `pendingDays`) |
+| `GET` | `/ess/holidays?year=` | Published org holiday calendar (location-aware) |
+| `GET` | `/ess/leave/calendar?year=&month=&filter=` | Month view with holidays + leave markers |
+| `GET` | `/ess/leave/transactions?date=&filter=` | Leave rows for a date |
+| `GET` | `/ess/home` | Dashboard including upcoming holidays |
+| `GET` | `/ess/notifications` | In-app notifications |
+
+**Operational tables:** `leave_requests`, `employee_leave_balances`, `employee_notifications`. **Master:** `leave_configurations`, `organization_calendars`, `organization_calendar_holidays`, `employees`, `employee_documents`.
+
+---
+
+### Users (`UsersModule`)
+
+Master-table service used by `AuthService` and `OrganizationsService`. No public HTTP controller.
+
+- Unique per `(email, organizationId)`
+- Roles: `SUPER_ADMIN`, `ORG_ADMIN`, `MANAGER`, `EMPLOYEE` (`roles.enum.ts`)
+- Status: `ACTIVE` / inactive via `UserStatus`
+
+---
+
+### Email (`modules/email`)
+
+`EmailService` — logs admin/employee credential payloads today; intended for future SMTP/provider integration.
+
+## Tenant Data Model (tables)
+
+All tenant tables live in **`public`** unless an older DB is mid-migration.
+
+| Table | Purpose |
+|-------|---------|
+| `employees` | Core profile, auth password, role, department/designation FKs, encrypted PAN/Aadhaar |
+| `employee_employment_details` | Employment type, managers, work mode, experience fields |
+| `employee_salary_details` | CTC, structure, PF/ESIC flags |
+| `employee_bank_details` | Encrypted account number + last four |
+| `employee_documents` | Onboarding uploads |
+| `employee_emergency_contacts` | Emergency contacts |
+| `employee_access_control` | Portal access + MFA/welcome flags |
+| `employee_audit_logs` | HR change audit trail |
+| `departments` | Department master |
+| `designations` | Designation master |
+| `designation_departments` | Allowed designation ↔ department pairs |
+| `organization_settings` | Legacy-compatible key-value JSON store |
+| `settings_catalog` / `tenant_settings` | Catalog-driven settings (normalization path) |
+| `locations_configurations` | Branch/location master |
+| `leave_configurations` | Leave types per branch |
+| `work_shift_configurations` | Shifts tied to `locationId` |
+
+Master tables: `organizations`, `users`, `refresh_sessions`.
+
+## Migrations
+
+### Master (`src/migrations/`)
+
+| Migration | Purpose |
+|-----------|---------|
+| `1768936823119-create-organizations` | Organizations table |
+| `1768942400000-create-users` | Users table |
+| `1768949800000-expand-organizations-profile` | Extended org profile columns |
+| `1769000000000-add-tenant-db-fields-to-organizations` | `dbName`, credentials |
+| `1769100000000-add-org-port-to-organizations` | `org_port` |
+| `1780100000000-create-refresh-sessions` | Refresh session store |
+
+### Tenant (`src/migrations/tenant/`)
+
+Chronological highlights:
+
+| Migration | Purpose |
+|-----------|---------|
+| `1769000000001` | Employees table |
+| `1769000000002` | Employee auth columns |
+| `1770000000000` | Organization settings |
+| `1771000000000` | Settings timestamp fix |
+| `1772000000000` | HR onboarding module tables |
+| `1773000000000` | Audit log base columns |
+| `1774000000000` | Emergency contacts |
+| `1775000000000` | Experience fields |
+| `1776000000000`–`0002` | Tenant normalization v2 |
+| `1776000000001` | Drop legacy dept/designation columns on employees |
+| `1776000000004` | Revert partitioned schemas → `public` |
+| `1777000000000` | `work_shifts` (superseded) |
+| `1778000000000` | Location configurations |
+| `1779000000000` | `work_shift_configurations` (replaces `work_shifts`) |
+| `1780000000000` | Leave configurations |
+| `1781000000000` | Leave configuration extended fields |
+
+Run all tenants: `npm run tenant:migrate` → `scripts/run-tenant-migrations.cjs`.
+
+## Security Notes
+
+- **Cookie-first auth** — access/refresh HttpOnly; host-only cookies (no `Domain` attribute)
+- **Bearer fallback** — Swagger/tooling only; same guards read cookie first
+- **Refresh rotation** — hashed tokens in master DB; revoke on logout
+- **Tenant isolation** — middleware binding + `TenantAuthGuard` subdomain match
+- **Field encryption** — PAN, Aadhaar, bank account, document payloads at rest
+- **Bootstrap protection** — `BOOTSTRAP_ADMIN_KEY` for super-admin bootstrap/register escalation
+- **Role assignment** — `SUPER_ADMIN` registration requires bootstrap key
+- **Password hashing** — scrypt (platform users in `AuthService`; employees via `PasswordService`)
+- **TypeORM** — `synchronize: false` everywhere (never enable in production)
+
+## Environment Variables
+
+### Database
+
+| Variable | Purpose |
+|----------|---------|
+| `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS`, `DB_NAME` | Master PostgreSQL |
+| `DB_LOGGING` | Master query logging (`true`/`false`) |
+
+### Server / HTTP
+
+| Variable | Purpose |
+|----------|---------|
+| `PORT` | API listen port (default `3000`) |
+| `NODE_ENV` | `production` loads `.env.production`; affects cookies, trust proxy, tenant logging |
+| `TRUST_PROXY` | Express `trust proxy` when `true` |
+| `JSON_BODY_LIMIT` | Request body cap (default `100mb`) |
+| `WEB_APP_ORIGINS` | Comma-separated CORS allowlist (credentials enabled) |
+
+### Auth / cookies
+
+| Variable | Purpose |
+|----------|---------|
+| `JWT_SECRET` / `AUTH_TOKEN_SECRET` | HMAC signing (encryption fallback) |
+| `JWT_ACCESS_EXPIRES_IN` / `JWT_EXPIRES_IN` | Access token TTL |
+| `JWT_REFRESH_EXPIRES_IN` | Refresh token TTL |
+| `AUTH_ACCESS_COOKIE_NAME` / `AUTH_REFRESH_COOKIE_NAME` | Cookie names |
+| `COOKIE_SECURE` | Force `Secure` cookies |
+| `COOKIE_SAMESITE` | `lax` (default), `strict`, or `none` |
+
+### Bootstrap / defaults
+
+| Variable | Purpose |
+|----------|---------|
+| `BOOTSTRAP_ADMIN_KEY` | Super-admin bootstrap + elevated register |
+| `DEFAULT_SUPERADMIN_EMAIL` / `DEFAULT_SUPERADMIN_PASSWORD` | Auto seed SUPER_ADMIN |
+| `DEFAULT_ORGANIZATION_NAME` / `DEFAULT_ORGANIZATION_SUBDOMAIN` | Default org for seed user |
+
+### Multi-tenant runtime
+
+| Variable | Purpose |
+|----------|---------|
+| `TENANT_CONNECTION_POOL_SIZE` | Per-tenant pool (default `10`) |
+| `TENANT_LOCK_SUBDOMAIN` | Pin API instance to one tenant |
+| `ORG_PORT_START` | First port for new orgs (default `6000`) |
+| `API_SUBDOMAIN` | Subdomain to skip tenant binding (default `api`) |
+
+### Security
+
+| Variable | Purpose |
+|----------|---------|
+| `FIELD_ENCRYPTION_KEY` | AES key for sensitive employee fields (64-char hex) |
+
+### Proxy / PM2 (optional local prod-like setup)
+
+| Variable | Purpose |
+|----------|---------|
+| `PROXY_PORT` | Domain proxy port (default `8080`) |
+| `SUPERADMIN_PORT` | Super-admin API port (default `3000`) |
+| `APP_DOMAIN` | Base domain for subdomain routing |
+| `PROXY_CACHE_TTL_MS` | Org lookup cache in proxy |
+
+## NPM Scripts
+
+| Script | Command |
+|--------|---------|
+| `build` | `nest build` |
+| `start` / `start:dev` / `start:debug` / `start:prod` | Nest run modes (`start:prod` → `node dist/src/main.js`) |
+| `lint` | ESLint |
+| `test` / `test:watch` / `test:cov` / `test:e2e` | Jest |
+| `format` | Prettier |
+| `proxy:start` | `node ./proxy/domain-proxy.cjs` |
+| `pm2:start:base` | Super-admin + proxy via PM2 |
+| `pm2:sync:orgs` | Generate per-org PM2 apps from master DB |
+| `pm2:save` | Persist PM2 process list |
+| `tenant:migrate` | Run pending migrations on all tenant DBs |
+
+## Local Multi-Tenant Topology (optional)
+
+1. **Super-admin API** — root port (`3000`), no tenant lock  
+2. **Domain proxy** — port `8080`, routes `{subdomain}.localhost` → `organization.orgPort`  
+3. **Per-org API processes** — `pm2:sync:orgs` starts Nest with `TENANT_LOCK_SUBDOMAIN={subdomain}` and `PORT={orgPort}`
+
+`proxy/domain-proxy.cjs` reads `organizations` from master PostgreSQL and forwards HTTP/WebSocket to the matching `orgPort`.
+
+## Related Documentation
+
+- `docs/db-standards.md` — naming and migration conventions  
+- `docs/tenant-data-dictionary.md` — table-level dictionary (note: schema names in doc reflect historical layout; runtime uses `public` after revert migration)
 
 ## Current-State Notes
 
-- Swagger bearer auth is documented as optional for tooling; production app flows use cookies.
-- `AuthService.ensureDefaultSuperAdmin()` is auto-invoked during app bootstrap through `SuperAdminBootstrapService`.
-- Current health check endpoint is `GET /` (`AppController`); `/health` is currently only in tenant-middleware excluded paths.
+- Swagger Bearer auth is optional; production clients should use cookies with `credentials: include`.
+- `EmailService` does not send real email yet — credentials are logged server-side.
+- `GET /` is the implemented health endpoint; `/health` is only excluded from tenant middleware.
+- Platform `Role.MANAGER` exists on master users but tenant employee roles use `EmployeeRole`; align new features with tenant enums for employee APIs.
+- Attendance **shifts** in API responses are backed by `work_shift_configurations`; legacy JSON in `attendance.shifts` is migrated on read when needed.

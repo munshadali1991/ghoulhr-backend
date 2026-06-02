@@ -41,6 +41,9 @@ export class LeaveConfiguration extends BaseEntity {
   @Column({ type: 'int', nullable: true })
   supportingDocumentAfterDays?: number | null;
 
+  @Column({ type: 'int', nullable: true })
+  maxConsecutiveDays?: number | null;
+
   @Column({ type: 'boolean', default: false })
   weekendsCountAsLeave: boolean;
 

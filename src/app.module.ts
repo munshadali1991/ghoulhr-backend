@@ -14,6 +14,7 @@ import { UsersModule } from './users/users.module';
 import { DatabaseCoreModule } from './core/database/database-core.module';
 import { EmployeesModule } from './employees/employees.module';
 import { SettingsModule } from './settings/settings.module';
+import { EssModule } from './ess/ess.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { SettingsModule } from './settings/settings.module';
     OrganizationsModule,
     EmployeesModule,
     SettingsModule,
+    EssModule,
   ],
   controllers: [AppController],
   providers: [AppService],

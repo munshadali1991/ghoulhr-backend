@@ -73,6 +73,18 @@ export class LeaveConfigurationItemDto {
   @Max(365)
   supportingDocumentAfterDays?: number;
 
+  @ApiProperty({
+    required: false,
+    example: 5,
+    description: 'Maximum consecutive days allowed per single booking; omit for no cap',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(366)
+  maxConsecutiveDays?: number;
+
   @ApiProperty({ required: false, example: false })
   @IsOptional()
   @IsBoolean()

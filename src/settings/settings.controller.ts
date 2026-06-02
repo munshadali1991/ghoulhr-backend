@@ -15,6 +15,7 @@ import {
   UpdateEmployeeSettingsDto,
   UpdateAttendanceSettingsDto,
 } from './dto/create-setting.dto';
+import { UpdateTimesheetSettingsDto } from './dto/timesheet-settings.dto';
 import { UpdateLocationConfigurationsDto } from './dto/location-configuration.dto';
 import { UpdateLeaveConfigurationsDto } from './dto/leave-configuration.dto';
 import { TenantAuthGuard } from '../auth/guards/tenant-auth.guard';
@@ -92,6 +93,25 @@ export class SettingsController {
       req.organization?.id,
     );
     return { message: 'Attendance settings updated successfully', updates };
+  }
+
+  @Get('timesheet')
+  @ApiOperation({ summary: 'Get timesheet settings' })
+  async getTimesheetSettings(@Req() req: TenantRequest) {
+    return this.settingsService.getTimesheetSettings(req.tenantDataSource);
+  }
+
+  @Post('timesheet')
+  @ApiOperation({ summary: 'Update timesheet settings' })
+  async updateTimesheetSettings(
+    @Req() req: TenantRequest,
+    @Body() dto: UpdateTimesheetSettingsDto,
+  ) {
+    const settings = await this.settingsService.updateTimesheetSettings(
+      dto,
+      req.tenantDataSource,
+    );
+    return { message: 'Timesheet settings updated successfully', settings };
   }
 
   @Get('locations')

@@ -338,10 +338,6 @@ export class EmployeesService {
             employee: saved,
             employmentType: employment.employmentType,
             employmentStatus: employment.employmentStatus,
-            reportingManagerId: this.optionalUuidField(
-              employment.reportingManagerId,
-              'Reporting manager',
-            ),
             hrManagerId: this.optionalUuidField(
               employment.hrManagerId,
               'HR manager',
@@ -615,10 +611,6 @@ export class EmployeesService {
           employee: savedEmployee,
           employmentType: employment.employmentType,
           employmentStatus: employment.employmentStatus,
-          reportingManagerId: this.optionalUuidField(
-            employment.reportingManagerId,
-            'Reporting manager',
-          ),
           hrManagerId: this.optionalUuidField(employment.hrManagerId, 'HR manager'),
           workMode: employment.workMode,
           shift: employment.shift,
