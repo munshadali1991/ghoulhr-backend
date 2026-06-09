@@ -2,10 +2,13 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  NotFoundException,
 } from '@nestjs/common';
-import { DataSource, Between } from 'typeorm';
+import { DataSource, Between, In } from 'typeorm';
 import { WorkShiftConfiguration } from '../../employees/entities/work-shift-configuration.entity';
+import { WorkShiftSession } from '../../employees/entities/work-shift-session.entity';
+import { LocationConfiguration } from '../../employees/entities/location-configuration.entity';
+import { OrganizationSetting } from '../../settings/entities/organization-setting.entity';
+import { SETTING_KEYS, VALID_WEEKDAYS } from '../../settings/settings.constants';
 import {
   AttendancePunch,
   AttendancePunchType,
@@ -17,35 +20,52 @@ import {
 import { AttendanceSession } from '../entities/attendance-session.entity';
 import { LeavePolicyService } from '../leave/leave-policy.service';
 import {
-  daysInMonth,
-  formatDateKey,
-  formatHomeDate,
+  buildOrgWallClockDate,
+  formatDateInOrg,
+  formatTimeInOrg,
+  orgDateKeyForInstant,
+  orgDayBounds,
+  resolveOrgTimezone,
+} from '../../common/utils/org-timezone.util';
+import {
+  calcEarlyOutMinutes,
+  calcLateInMinutes,
+  calcShortfallAndExcess,
+  calcWorkInShiftMinutes,
+  dayOfWeekShort,
+  formatLateEarlyMinutes,
   formatMinutesAsHhMm,
-  formatTimeOrDash,
-  isWeekend,
+  formatProcessedAt,
+  grossShiftSpanMinutes,
+  isRestDay,
+  matchShiftByName,
+  resolveShiftEndDate,
+  shouldFlagAttendanceException,
+} from '../shared/attendance-shift.util';
+import {
+  daysInMonth,
+  formatHomeDate,
 } from '../shared/ess-format.util';
+
+type ShiftSessionDef = {
+  sessionLabel: string;
+  startTime: string;
+  endTime: string;
+};
 
 @Injectable()
 export class EssAttendanceService {
   constructor(private readonly policyService: LeavePolicyService) {}
 
-  todayLocalDateKey(): string {
-    const n = new Date();
-    const y = n.getFullYear();
-    const m = String(n.getMonth() + 1).padStart(2, '0');
-    const d = String(n.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+  todayLocalDateKey(timezone?: string | null): string {
+    return orgDateKeyForInstant(new Date(), timezone);
   }
 
-  /**
-   * Inclusive local-day window for YYYY-MM-DD (matches todayLocalDateKey()).
-   * Avoids UTC midnight bounds that miss punches near timezone boundaries.
-   */
-  private dayBoundsLocal(workDate: string): { start: Date; end: Date } {
-    const [y, m, d] = workDate.split('-').map((part) => Number(part));
-    const start = new Date(y, m - 1, d, 0, 0, 0, 0);
-    const end = new Date(y, m - 1, d, 23, 59, 59, 999);
-    return { start, end };
+  private dayBoundsLocal(
+    workDate: string,
+    timezone?: string | null,
+  ): { start: Date; end: Date } {
+    return orgDayBounds(workDate, timezone);
   }
 
   async isSignedIn(
@@ -53,12 +73,14 @@ export class EssAttendanceService {
     organizationId: string,
     employeeId: string,
   ): Promise<boolean> {
-    const workDate = this.todayLocalDateKey();
+    const { timezone } = await this.loadAttendancePolicy(dataSource);
+    const workDate = this.todayLocalDateKey(timezone);
     const punches = await this.getPunchesForDay(
       dataSource,
       organizationId,
       employeeId,
       workDate,
+      timezone,
     );
     return this.hasOpenSession(punches);
   }
@@ -70,13 +92,17 @@ export class EssAttendanceService {
     latitude?: number,
     longitude?: number,
   ) {
-    const workDate = this.todayLocalDateKey();
     return dataSource.transaction(async (em) => {
+      const { timezone } = await this.loadAttendancePolicy(em);
+      const workDate = this.todayLocalDateKey(timezone);
+      const shift = await this.requireEmployeeShift(em, organizationId, employeeId);
+
       const punches = await this.getPunchesForDay(
         em,
         organizationId,
         employeeId,
         workDate,
+        timezone,
       );
       if (this.hasOpenSession(punches)) {
         throw new ConflictException('You are already signed in');
@@ -96,15 +122,7 @@ export class EssAttendanceService {
         }),
       );
 
-      const shift = await this.resolveDefaultShift(em, organizationId, employeeId);
-      await this.recomputeDailySummary(
-        em,
-        organizationId,
-        employeeId,
-        workDate,
-        shift?.id ?? null,
-        shift?.breakMinutes ?? 0,
-      );
+      await this.recomputeDailySummary(em, organizationId, employeeId, workDate, shift);
 
       return { signedIn: true, punchedAt: now.toISOString() };
     });
@@ -117,13 +135,15 @@ export class EssAttendanceService {
     latitude?: number,
     longitude?: number,
   ) {
-    const workDate = this.todayLocalDateKey();
     return dataSource.transaction(async (em) => {
+      const { timezone } = await this.loadAttendancePolicy(em);
+      const workDate = this.todayLocalDateKey(timezone);
       const punches = await this.getPunchesForDay(
         em,
         organizationId,
         employeeId,
         workDate,
+        timezone,
       );
       if (!this.hasOpenSession(punches)) {
         throw new BadRequestException('You are not signed in');
@@ -147,15 +167,17 @@ export class EssAttendanceService {
         where: { organizationId, employeeId, workDate },
         relations: ['shiftConfiguration'],
       });
-      const breakMinutes = summary?.shiftConfiguration?.breakMinutes ?? 0;
-      await this.recomputeDailySummary(
-        em,
-        organizationId,
-        employeeId,
-        workDate,
-        summary?.shiftConfigurationId ?? null,
-        breakMinutes,
-      );
+      let shift = summary?.shiftConfiguration ?? null;
+      if (!shift && summary?.shiftConfigurationId) {
+        shift = await em.getRepository(WorkShiftConfiguration).findOne({
+          where: { id: summary.shiftConfigurationId },
+        });
+      }
+      if (!shift) {
+        shift = await this.requireEmployeeShift(em, organizationId, employeeId);
+      }
+
+      await this.recomputeDailySummary(em, organizationId, employeeId, workDate, shift);
 
       return { signedIn: false, punchedAt: now.toISOString() };
     });
@@ -166,13 +188,14 @@ export class EssAttendanceService {
     organizationId: string,
     employeeId: string,
   ) {
-    const workDate = this.todayLocalDateKey();
+    const { timezone } = await this.loadAttendancePolicy(dataSource);
+    const workDate = this.todayLocalDateKey(timezone);
     const signedIn = await this.isSignedIn(
       dataSource,
       organizationId,
       employeeId,
     );
-    const shift = await this.resolveDefaultShift(
+    const { shift } = await this.resolveEmployeeShift(
       dataSource,
       organizationId,
       employeeId,
@@ -195,6 +218,7 @@ export class EssAttendanceService {
     year: number,
     month: number,
   ) {
+    const policy = await this.loadAttendancePolicy(dataSource);
     const monthPad = String(month).padStart(2, '0');
     const lastDay = daysInMonth(year, month);
     const rangeStart = `${year}-${monthPad}-01`;
@@ -239,7 +263,9 @@ export class EssAttendanceService {
       avgActualWorkHrs: formatMinutesAsHhMm(avgMinutes),
       avgActualWorkHrsTrend: trend,
       penaltyDays: summaries.filter(
-        (s) => s.status === AttendanceDayStatus.A && !isWeekend(s.workDate),
+        (s) =>
+          s.status === AttendanceDayStatus.A &&
+          !isRestDay(s.workDate, policy.workingDays),
       ).length,
       insightsCount: exceptionDays > 0 ? Math.min(exceptionDays, 3) : 0,
       year,
@@ -254,6 +280,7 @@ export class EssAttendanceService {
     year: number,
     month: number,
   ) {
+    const policy = await this.loadAttendancePolicy(dataSource);
     const monthPad = String(month).padStart(2, '0');
     const lastDay = daysInMonth(year, month);
     const rangeStart = `${year}-${monthPad}-01`;
@@ -271,7 +298,6 @@ export class EssAttendanceService {
       });
 
     const byDate = new Map(summaries.map((s) => [s.workDate, s]));
-    /** @type {Record<string, object>} */
     const days: Record<string, object> = {};
 
     for (let d = 1; d <= lastDay; d += 1) {
@@ -287,7 +313,7 @@ export class EssAttendanceService {
           shiftCode,
           hasBreak: (summary.shiftConfiguration?.breakMinutes ?? 0) > 0,
         };
-      } else if (isWeekend(key)) {
+      } else if (isRestDay(key, policy.workingDays)) {
         days[key] = { date: key, status: AttendanceDayStatus.R };
       } else {
         days[key] = { date: key, status: AttendanceDayStatus.A };
@@ -303,62 +329,165 @@ export class EssAttendanceService {
     employeeId: string,
     date: string,
   ) {
-    const summary = await dataSource
-      .getRepository(AttendanceDailySummary)
-      .findOne({
-        where: { organizationId, employeeId, workDate: date },
-        relations: ['shiftConfiguration', 'sessions'],
-      });
+    const ctx = await this.resolveEmployeeShift(
+      dataSource,
+      organizationId,
+      employeeId,
+    );
+    const { timezone } = await this.loadAttendancePolicy(dataSource);
 
-    if (!summary) {
-      const shift = await this.resolveDefaultShift(
-        dataSource,
-        organizationId,
-        employeeId,
-      );
-      return this.emptyDayDetail(date, shift);
+    const punches = await this.getPunchesForDay(
+      dataSource,
+      organizationId,
+      employeeId,
+      date,
+      timezone,
+    );
+
+    const summaryRepo = dataSource.getRepository(AttendanceDailySummary);
+    let existingSummary = await summaryRepo.findOne({
+      where: { organizationId, employeeId, workDate: date },
+      relations: ['shiftConfiguration'],
+    });
+
+    const shiftForRecompute =
+      existingSummary?.shiftConfiguration ?? ctx.shift ?? null;
+
+    if (punches.length > 0 && shiftForRecompute) {
+      await dataSource.transaction(async (em) => {
+        await this.recomputeDailySummary(
+          em,
+          organizationId,
+          employeeId,
+          date,
+          shiftForRecompute,
+        );
+      });
     }
 
-    const shift = summary.shiftConfiguration;
+    const summary = await summaryRepo.findOne({
+      where: { organizationId, employeeId, workDate: date },
+      relations: ['shiftConfiguration', 'sessions'],
+    });
+
+    const swipes = punches.map((p) => ({
+      id: p.id,
+      punchedAt: p.punchedAt.toISOString(),
+      swipeTime: formatTimeInOrg(p.punchedAt, timezone),
+      swipeDate: formatDateInOrg(p.punchedAt, timezone),
+      location: ctx.locationName ?? '-',
+      source: p.source,
+    }));
+
+    if (!summary) {
+      return {
+        ...this.emptyDayDetail(date, ctx.shift),
+        locationName: ctx.locationName ?? '—',
+        dayOfWeek: dayOfWeekShort(date),
+        processedAt: null,
+        workHoursInShift: '-',
+        shortfallHrs: '-',
+        excessHrs: '-',
+        progressPercent: 0,
+        permissions: [],
+        swipes,
+      };
+    }
+
+    const shift = summary.shiftConfiguration ?? ctx.shift;
     const shiftName = shift?.name ?? '—';
+    const shiftCode = shiftName.replace(/\s/g, '').slice(0, 4).toUpperCase();
     const shiftTime = shift
       ? `${shift.startTime} to ${shift.endTime}`
       : '—';
 
-    const sessions = (summary.sessions ?? []).map((s) => ({
-      session: s.sessionLabel,
-      timing:
-        s.sessionStart && s.sessionEnd
-          ? `${formatTimeOrDash(s.sessionStart)} - ${formatTimeOrDash(s.sessionEnd)}`
-          : '—',
-      firstIn: formatTimeOrDash(s.firstIn),
-      lastOut: formatTimeOrDash(s.lastOut),
-    }));
+    const shiftStart =
+      shift && date
+        ? buildOrgWallClockDate(date, shift.startTime, timezone)
+        : null;
+    const shiftEndDate =
+      shift && date
+        ? resolveShiftEndDate(
+            shiftStart,
+            buildOrgWallClockDate(date, shift.endTime, timezone),
+          )
+        : null;
+    const displayLateIn = calcLateInMinutes(summary.firstIn ?? null, shiftStart);
+    const displayEarlyOut = calcEarlyOutMinutes(
+      summary.lastOut ?? null,
+      shiftEndDate,
+    );
+
+    const sessions = (summary.sessions ?? [])
+      .sort(
+        (a, b) =>
+          (a.sessionStart?.getTime() ?? 0) - (b.sessionStart?.getTime() ?? 0),
+      )
+      .map((s) => ({
+        session: s.sessionLabel,
+        timing:
+          s.sessionStart && s.sessionEnd
+            ? `${formatTimeInOrg(s.sessionStart, timezone)} - ${formatTimeInOrg(s.sessionEnd, timezone)}`
+            : '—',
+        firstIn: formatTimeInOrg(s.firstIn, timezone),
+        lastOut: formatTimeInOrg(s.lastOut, timezone),
+      }));
+
+    const expectedNet = shift
+      ? Math.max(0, grossShiftSpanMinutes(shift.startTime, shift.endTime) - (shift.breakMinutes ?? 0))
+      : 0;
+    const progressPercent =
+      expectedNet > 0
+        ? Math.min(100, Math.round((summary.workInShiftMinutes / expectedNet) * 100))
+        : 0;
 
     return {
       date,
-      shiftName: shift ? `${shiftName}(${shiftName.replace(/\s/g, '').slice(0, 4)})` : shiftName,
+      dayOfWeek: dayOfWeekShort(date),
+      shiftName: shift ? `${shiftName}(${shiftCode})` : shiftName,
       shiftTime,
-      scheme: shift ? `${shift.name} scheme Attendance Scheme` : '—',
-      firstIn: formatTimeOrDash(summary.firstIn),
-      lastOut: formatTimeOrDash(summary.lastOut),
-      lateIn: summary.lateInMinutes > 0 ? String(summary.lateInMinutes) : '-',
-      earlyOut: summary.earlyOutMinutes > 0 ? String(summary.earlyOutMinutes) : '-',
+      scheme: shift ? `${shift.name} scheme` : '—',
+      schemeLabel: 'Attendance Scheme',
+      firstIn: formatTimeInOrg(summary.firstIn, timezone),
+      lastOut: formatTimeInOrg(summary.lastOut, timezone),
+      lateIn: formatLateEarlyMinutes(displayLateIn),
+      earlyOut: formatLateEarlyMinutes(displayEarlyOut),
       totalWorkHrs: formatMinutesAsHhMm(summary.totalWorkMinutes),
-      breakHrs: formatMinutesAsHhMm(summary.breakMinutes),
+      breakHrs:
+        summary.breakMinutes > 0 ? formatMinutesAsHhMm(summary.breakMinutes) : '-',
       actualWork: formatMinutesAsHhMm(summary.actualWorkMinutes),
+      workHoursInShift: formatMinutesAsHhMm(summary.workInShiftMinutes),
+      shortfallHrs:
+        summary.shortfallMinutes > 0
+          ? formatMinutesAsHhMm(summary.shortfallMinutes)
+          : '-',
+      excessHrs:
+        summary.excessMinutes > 0
+          ? formatMinutesAsHhMm(summary.excessMinutes)
+          : '-',
+      progressPercent,
+      processedAt: summary.updatedAt
+        ? formatProcessedAt(summary.updatedAt)
+        : null,
+      locationName: ctx.locationName ?? '—',
       status: summary.status,
       remarks: summary.remarks ?? '-',
       sessions,
+      permissions: [],
+      swipes,
     };
   }
 
   private emptyDayDetail(date: string, shift?: WorkShiftConfiguration | null) {
+    const shiftName = shift?.name ?? '—';
+    const shiftCode = shiftName.replace(/\s/g, '').slice(0, 4).toUpperCase();
     return {
       date,
-      shiftName: shift?.name ?? '—',
+      dayOfWeek: dayOfWeekShort(date),
+      shiftName: shift ? `${shiftName}(${shiftCode})` : shiftName,
       shiftTime: shift ? `${shift.startTime} to ${shift.endTime}` : '—',
-      scheme: shift ? `${shift.name} scheme Attendance Scheme` : '—',
+      scheme: shift ? `${shift.name} scheme` : '—',
+      schemeLabel: 'Attendance Scheme',
       firstIn: '-',
       lastOut: '-',
       lateIn: '-',
@@ -366,9 +495,16 @@ export class EssAttendanceService {
       totalWorkHrs: '-',
       breakHrs: '-',
       actualWork: '-',
+      workHoursInShift: '-',
+      shortfallHrs: '-',
+      excessHrs: '-',
+      progressPercent: 0,
+      processedAt: null,
       status: '-',
       remarks: '-',
       sessions: [],
+      permissions: [],
+      swipes: [],
     };
   }
 
@@ -377,8 +513,9 @@ export class EssAttendanceService {
     organizationId: string,
     employeeId: string,
     workDate: string,
+    timezone?: string | null,
   ): Promise<AttendancePunch[]> {
-    const { start, end } = this.dayBoundsLocal(workDate);
+    const { start, end } = this.dayBoundsLocal(workDate, timezone);
     return em.getRepository(AttendancePunch).find({
       where: {
         organizationId,
@@ -403,14 +540,15 @@ export class EssAttendanceService {
     organizationId: string,
     employeeId: string,
     workDate: string,
-    shiftConfigurationId: string | null,
-    breakMinutes: number,
+    shift: WorkShiftConfiguration,
   ) {
+    const policy = await this.loadAttendancePolicy(em);
     const punches = await this.getPunchesForDay(
       em,
       organizationId,
       employeeId,
       workDate,
+      policy.timezone,
     );
 
     const pairs: { in: Date; out?: Date }[] = [];
@@ -428,32 +566,74 @@ export class EssAttendanceService {
     }
 
     const firstIn = pairs.length > 0 ? pairs[0].in : null;
+    const closedPairs = pairs.filter((p) => p.out);
     const lastOut =
-      pairs.filter((p) => p.out).length > 0
-        ? pairs.filter((p) => p.out).at(-1)!.out!
-        : null;
+      closedPairs.length > 0 ? closedPairs[closedPairs.length - 1].out! : null;
 
     let totalWorkMinutes = 0;
-    pairs.forEach((pair, idx) => {
+    for (const pair of pairs) {
       if (pair.out) {
         totalWorkMinutes += Math.max(
           0,
           Math.round((pair.out.getTime() - pair.in.getTime()) / 60000),
         );
       }
-    });
+    }
 
+    const breakMinutes = shift.breakMinutes ?? 0;
     const actualWorkMinutes = Math.max(0, totalWorkMinutes - breakMinutes);
-    const weekend = isWeekend(workDate);
+
+    const shiftStart = buildOrgWallClockDate(
+      workDate,
+      shift.startTime,
+      policy.timezone,
+    );
+    const shiftEnd = buildOrgWallClockDate(
+      workDate,
+      shift.endTime,
+      policy.timezone,
+    );
+    const shiftEndDate = resolveShiftEndDate(shiftStart, shiftEnd);
+    const now = new Date();
+
+    const workInShiftMinutes = calcWorkInShiftMinutes(
+      pairs,
+      shiftStart,
+      shiftEndDate,
+      now,
+    );
+
+    const expectedNetMinutes = Math.max(
+      0,
+      grossShiftSpanMinutes(shift.startTime, shift.endTime) - breakMinutes,
+    );
+    const { shortfallMinutes, excessMinutes } = calcShortfallAndExcess(
+      expectedNetMinutes,
+      workInShiftMinutes,
+      actualWorkMinutes,
+    );
+
+    const grace = policy.graceMinutes;
+    const lateInMinutes = calcLateInMinutes(firstIn, shiftStart);
+    const earlyOutMinutes = calcEarlyOutMinutes(lastOut, shiftEndDate);
+
+    const rest = isRestDay(workDate, policy.workingDays);
     let status = AttendanceDayStatus.A;
-    if (weekend) {
+    if (rest) {
       status = AttendanceDayStatus.R;
     } else if (firstIn) {
       status = AttendanceDayStatus.P;
     }
 
-    const exceptionFlag =
-      !weekend && (status === AttendanceDayStatus.A || !lastOut);
+    const exceptionFlag = shouldFlagAttendanceException({
+      rest,
+      absent: status === AttendanceDayStatus.A,
+      lastOut,
+      lateInMinutes,
+      earlyOutMinutes,
+      shortfallMinutes,
+      graceMinutes: grace,
+    });
 
     const repo = em.getRepository(AttendanceDailySummary);
     let summary = await repo.findOne({
@@ -469,15 +649,18 @@ export class EssAttendanceService {
     }
 
     summary.status = status;
-    summary.shiftConfigurationId = shiftConfigurationId;
+    summary.shiftConfigurationId = shift.id;
     summary.firstIn = firstIn;
     summary.lastOut = lastOut;
     summary.totalWorkMinutes = totalWorkMinutes;
     summary.breakMinutes = breakMinutes;
     summary.actualWorkMinutes = actualWorkMinutes;
+    summary.workInShiftMinutes = workInShiftMinutes;
+    summary.shortfallMinutes = shortfallMinutes;
+    summary.excessMinutes = excessMinutes;
     summary.exceptionFlag = exceptionFlag;
-    summary.lateInMinutes = 0;
-    summary.earlyOutMinutes = 0;
+    summary.lateInMinutes = lateInMinutes;
+    summary.earlyOutMinutes = earlyOutMinutes;
     summary.remarks = exceptionFlag ? 'Exception' : null;
 
     summary = await repo.save(summary);
@@ -486,16 +669,54 @@ export class EssAttendanceService {
       dailySummaryId: summary.id,
     });
 
-    const sessionEntities = pairs.map((pair, idx) =>
-      em.getRepository(AttendanceSession).create({
+    const sessionDefs = await this.getShiftSessionDefs(em, shift);
+    const inPunches = punches.filter((p) => p.punchType === AttendancePunchType.IN);
+    const outPunches = punches.filter((p) => p.punchType === AttendancePunchType.OUT);
+    const dayFirstIn = inPunches[0]?.punchedAt ?? null;
+    const dayLastOut = outPunches[outPunches.length - 1]?.punchedAt ?? null;
+
+    const sessionEntities = sessionDefs.map((def, idx) => {
+      const winStart = buildOrgWallClockDate(
+        workDate,
+        def.startTime,
+        policy.timezone,
+      )!;
+      let winEnd = buildOrgWallClockDate(
+        workDate,
+        def.endTime,
+        policy.timezone,
+      )!;
+      if (winEnd.getTime() <= winStart.getTime()) {
+        winEnd = new Date(winEnd.getTime() + 24 * 60 * 60 * 1000);
+      }
+
+      const isFirst = idx === 0;
+      const isLast = idx === sessionDefs.length - 1;
+
+      const insInWindow = inPunches.filter(
+        (p) => p.punchedAt >= winStart && p.punchedAt <= winEnd,
+      );
+      const outsInWindow = outPunches.filter(
+        (p) => p.punchedAt >= winStart && p.punchedAt <= winEnd,
+      );
+
+      const sessionFirstIn = isFirst
+        ? dayFirstIn
+        : insInWindow[0]?.punchedAt ?? null;
+      const sessionLastOut = isLast
+        ? dayLastOut
+        : outsInWindow[outsInWindow.length - 1]?.punchedAt ?? null;
+
+      return em.getRepository(AttendanceSession).create({
         dailySummaryId: summary!.id,
-        sessionLabel: `Session ${idx + 1}`,
-        sessionStart: pair.in,
-        sessionEnd: pair.out ?? null,
-        firstIn: pair.in,
-        lastOut: pair.out ?? null,
-      }),
-    );
+        sessionLabel: def.sessionLabel,
+        sessionStart: winStart,
+        sessionEnd: winEnd,
+        firstIn: sessionFirstIn,
+        lastOut: sessionLastOut,
+      });
+    });
+
     if (sessionEntities.length > 0) {
       await em.getRepository(AttendanceSession).save(sessionEntities);
     }
@@ -503,21 +724,156 @@ export class EssAttendanceService {
     return summary;
   }
 
-  private async resolveDefaultShift(
+  private async getShiftSessionDefs(
+    em: DataSource | import('typeorm').EntityManager,
+    shift: WorkShiftConfiguration,
+  ): Promise<ShiftSessionDef[]> {
+    const rows = await em.getRepository(WorkShiftSession).find({
+      where: { shiftConfigurationId: shift.id },
+      order: { sortOrder: 'ASC', id: 'ASC' },
+    });
+
+    if (rows.length > 0) {
+      return rows.map((r) => ({
+        sessionLabel: r.sessionLabel,
+        startTime: r.startTime,
+        endTime: r.endTime,
+      }));
+    }
+
+    return [
+      {
+        sessionLabel: 'Session 1',
+        startTime: shift.startTime,
+        endTime: shift.endTime,
+      },
+    ];
+  }
+
+  private async resolveEmployeeShift(
     em: DataSource | import('typeorm').EntityManager,
     organizationId: string,
     employeeId: string,
-  ): Promise<WorkShiftConfiguration | null> {
-    const { locationId } = await this.policyService.getEmployeeContext(
+  ): Promise<{
+    shift: WorkShiftConfiguration | null;
+    locationId: string | null;
+    locationName: string | null;
+  }> {
+    const { locationId, employment } = await this.policyService.getEmployeeContext(
       em as DataSource,
       organizationId,
       employeeId,
     );
-    if (!locationId) return null;
-    return em.getRepository(WorkShiftConfiguration).findOne({
+
+    let locationName: string | null = null;
+    if (locationId) {
+      const loc = await em.getRepository(LocationConfiguration).findOne({
+        where: { id: locationId },
+      });
+      locationName = loc?.name ?? null;
+    }
+
+    if (!locationId) {
+      return { shift: null, locationId: null, locationName };
+    }
+
+    const shifts = await em.getRepository(WorkShiftConfiguration).find({
       where: { locationId },
-      order: { sortOrder: 'ASC' },
+      order: { sortOrder: 'ASC', id: 'ASC' },
     });
+
+    if (shifts.length === 0) {
+      return { shift: null, locationId, locationName };
+    }
+
+    const matched = matchShiftByName(employment?.shift, shifts);
+    if (matched) {
+      const shift = shifts.find((s) => s.name === matched.name) ?? null;
+      return { shift, locationId, locationName };
+    }
+
+    if (shifts.length === 1) {
+      return { shift: shifts[0], locationId, locationName };
+    }
+
+    return { shift: null, locationId, locationName };
+  }
+
+  private async requireEmployeeShift(
+    em: DataSource | import('typeorm').EntityManager,
+    organizationId: string,
+    employeeId: string,
+  ): Promise<WorkShiftConfiguration> {
+    const { shift, locationId, locationName } = await this.resolveEmployeeShift(
+      em,
+      organizationId,
+      employeeId,
+    );
+
+    if (!locationId) {
+      throw new BadRequestException(
+        'Your branch or business unit is not configured. Please contact HR to assign a location.',
+      );
+    }
+
+    const shifts = await em.getRepository(WorkShiftConfiguration).find({
+      where: { locationId },
+    });
+
+    if (shifts.length === 0) {
+      throw new BadRequestException(
+        `No shifts are configured for ${locationName ?? 'your branch'}. Please contact HR.`,
+      );
+    }
+
+    if (!shift) {
+      throw new BadRequestException(
+        'Your work shift is not assigned. Please contact HR to set your shift for this branch.',
+      );
+    }
+
+    return shift;
+  }
+
+  private async loadAttendancePolicy(
+    em: DataSource | import('typeorm').EntityManager,
+  ): Promise<{
+    graceMinutes: number;
+    workingDays: string[] | null;
+    timezone: string;
+  }> {
+    const repo = em.getRepository(OrganizationSetting);
+    const keys = [
+      SETTING_KEYS.ATTENDANCE_GRACE_PERIOD,
+      SETTING_KEYS.ATTENDANCE_WORKING_DAYS,
+      SETTING_KEYS.ORG_TIMEZONE,
+    ];
+    const rows = await repo.find({ where: { key: In(keys) } });
+
+    let graceMinutes = 0;
+    let workingDays: string[] | null = null;
+    let timezone = resolveOrgTimezone(null);
+
+    for (const row of rows) {
+      if (row.key === SETTING_KEYS.ATTENDANCE_GRACE_PERIOD) {
+        const v = Number(row.value);
+        graceMinutes = Number.isFinite(v) && v >= 0 ? v : 0;
+      }
+      if (row.key === SETTING_KEYS.ATTENDANCE_WORKING_DAYS) {
+        if (Array.isArray(row.value)) {
+          workingDays = row.value.filter((d) =>
+            (VALID_WEEKDAYS as readonly string[]).includes(d),
+          );
+        }
+      }
+      if (row.key === SETTING_KEYS.ORG_TIMEZONE) {
+        timezone = resolveOrgTimezone(
+          typeof row.value === 'string' ? row.value : null,
+        );
+      }
+    }
+
+    return { graceMinutes, workingDays, timezone };
   }
 
   private async averageActualMinutes(

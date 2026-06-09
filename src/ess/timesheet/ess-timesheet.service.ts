@@ -3,7 +3,7 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
-import { DataSource, Between } from 'typeorm';
+import { DataSource, Between, EntityManager, IsNull } from 'typeorm';
 import { SettingsService } from '../../settings/settings.service';
 import {
   TimesheetDay,
@@ -17,7 +17,10 @@ import {
 import { TimesheetEntryDto } from './dto/timesheet-entry.dto';
 import { UpsertTimesheetDayDto } from './dto/upsert-timesheet-day.dto';
 import { TimesheetReportQueryDto } from './dto/timesheet-report-query.dto';
+import { TimesheetEntryReportQueryDto } from './dto/timesheet-entry-report-query.dto';
 import { EssAttendanceService } from '../attendance/ess-attendance.service';
+import { TimesheetCategoryService } from '../../settings/timesheet-category.service';
+import { TimesheetCategory } from '../entities/timesheet-category.entity';
 
 function parseDateKey(date: string): Date {
   const [y, m, d] = date.split('-').map(Number);
@@ -46,7 +49,12 @@ export class EssTimesheetService {
   constructor(
     private readonly settingsService: SettingsService,
     private readonly attendanceService: EssAttendanceService,
+    private readonly categoryService: TimesheetCategoryService,
   ) {}
+
+  async getCategories(dataSource: DataSource, organizationId: string) {
+    return this.categoryService.listActiveCategories(dataSource, organizationId);
+  }
 
   async getSettings(dataSource: DataSource): Promise<Record<string, unknown>> {
     return this.settingsService.getTimesheetSettings(dataSource);
@@ -84,13 +92,34 @@ export class EssTimesheetService {
       projectName: entry.projectName,
       taskName: entry.taskName,
       taskDescription: entry.taskDescription,
-      workType: entry.workType,
+      categoryId: entry.categoryId,
+      categoryName: entry.category?.name ?? null,
       hoursSpent: Number(entry.hoursSpent),
       taskStatus: entry.taskStatus,
       priority: entry.priority,
       blockerNotes: entry.blockerNotes ?? null,
       sortOrder: entry.sortOrder,
     };
+  }
+
+  private async resolveCategoryForEntry(
+    em: EntityManager,
+    organizationId: string,
+    categoryId: string,
+  ): Promise<TimesheetCategory> {
+    const repo = em.getRepository(TimesheetCategory);
+    const category = await repo.findOne({
+      where: {
+        id: categoryId,
+        organizationId,
+        isActive: true,
+        deletedAt: IsNull(),
+      },
+    });
+    if (!category) {
+      throw new BadRequestException('Invalid or inactive timesheet category.');
+    }
+    return category;
   }
 
   private mapDayToApi(day: TimesheetDay, settings: Record<string, unknown>) {
@@ -129,7 +158,7 @@ export class EssTimesheetService {
     const repo = dataSource.getRepository(TimesheetDay);
     const day = await repo.findOne({
       where: { organizationId, employeeId, workDate },
-      relations: ['entries'],
+      relations: ['entries', 'entries.category'],
     });
 
     if (!day) {
@@ -226,13 +255,14 @@ export class EssTimesheetService {
 
       let order = 0;
       for (const item of dto.entries) {
+        await this.resolveCategoryForEntry(em, organizationId, item.categoryId);
         await entryRepo.save(
           entryRepo.create({
             timesheetDayId: day.id,
+            categoryId: item.categoryId,
             projectName: item.projectName.trim(),
             taskName: item.taskName.trim(),
             taskDescription: item.taskDescription.trim(),
-            workType: item.workType,
             hoursSpent: Number(item.hoursSpent).toFixed(2),
             taskStatus: item.taskStatus,
             priority: item.priority,
@@ -244,7 +274,7 @@ export class EssTimesheetService {
 
       const saved = await dayRepo.findOne({
         where: { id: day.id },
-        relations: ['entries'],
+        relations: ['entries', 'entries.category'],
       });
 
       return this.mapDayToApi(saved!, settings);
@@ -418,6 +448,57 @@ export class EssTimesheetService {
         maxHoursPerDay: settings.maxHoursPerDay,
         weekStartsOn: settings.weekStartsOn,
       },
+    };
+  }
+
+  async getReportEntries(
+    dataSource: DataSource,
+    organizationId: string,
+    employeeId: string,
+    query: TimesheetEntryReportQueryDto,
+  ) {
+    if (query.from > query.to) {
+      throw new BadRequestException('"from" must be on or before "to".');
+    }
+
+    const repo = dataSource.getRepository(TimesheetDay);
+    const days = await repo.find({
+      where: {
+        organizationId,
+        employeeId,
+        workDate: Between(query.from, query.to),
+      },
+      relations: ['entries', 'entries.category'],
+      order: { workDate: 'DESC' },
+    });
+
+    const rows: {
+      workDate: string;
+      dayStatus: string;
+      editable: boolean;
+      canReopen: boolean;
+      entry: ReturnType<typeof this.mapEntryToApi>;
+    }[] = [];
+
+    for (const day of days) {
+      const sorted = (day.entries ?? []).slice().sort((a, b) => a.sortOrder - b.sortOrder);
+      for (const entry of sorted) {
+        rows.push({
+          workDate: day.workDate,
+          dayStatus: day.status,
+          editable: TIMESHEET_EDITABLE_STATUSES.includes(day.status),
+          canReopen: day.status === TimesheetDayStatus.SUBMITTED,
+          entry: this.mapEntryToApi(entry),
+        });
+      }
+    }
+
+    return {
+      from: query.from,
+      to: query.to,
+      totalEntries: rows.length,
+      totalHours: rows.reduce((acc, r) => acc + r.entry.hoursSpent, 0),
+      rows,
     };
   }
 }

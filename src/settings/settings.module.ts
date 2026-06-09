@@ -4,6 +4,7 @@ import { SettingsService } from './settings.service';
 import { OrganizationCalendarController } from './organization-calendar.controller';
 import { OrganizationCalendarService } from './organization-calendar.service';
 import { OrganizationCalendarQueryService } from './organization-calendar-query.service';
+import { TimesheetCategoryService } from './timesheet-category.service';
 
 @Module({
   controllers: [SettingsController, OrganizationCalendarController],
@@ -11,11 +12,13 @@ import { OrganizationCalendarQueryService } from './organization-calendar-query.
     SettingsService,
     OrganizationCalendarService,
     OrganizationCalendarQueryService,
+    TimesheetCategoryService,
   ],
   exports: [
     SettingsService,
     OrganizationCalendarService,
     OrganizationCalendarQueryService,
+    TimesheetCategoryService,
   ],
 })
 export class SettingsModule {}

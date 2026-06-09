@@ -1,17 +1,7 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { BaseEntity } from '../../database/base.entity';
 import { TimesheetDay } from './timesheet-day.entity';
-
-export enum TimesheetWorkType {
-  DEVELOPMENT = 'DEVELOPMENT',
-  BUG_FIX = 'BUG_FIX',
-  TESTING = 'TESTING',
-  MEETING = 'MEETING',
-  RESEARCH = 'RESEARCH',
-  DOCUMENTATION = 'DOCUMENTATION',
-  DEPLOYMENT = 'DEPLOYMENT',
-  SUPPORT = 'SUPPORT',
-}
+import { TimesheetCategory } from './timesheet-category.entity';
 
 export enum TimesheetTaskStatus {
   NOT_STARTED = 'NOT_STARTED',
@@ -38,6 +28,13 @@ export class TimesheetEntry extends BaseEntity {
   @JoinColumn({ name: 'timesheetDayId' })
   timesheetDay?: TimesheetDay;
 
+  @Column({ type: 'uuid' })
+  categoryId: string;
+
+  @ManyToOne(() => TimesheetCategory, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'categoryId' })
+  category?: TimesheetCategory;
+
   @Column({ length: 120 })
   projectName: string;
 
@@ -46,9 +43,6 @@ export class TimesheetEntry extends BaseEntity {
 
   @Column({ type: 'text' })
   taskDescription: string;
-
-  @Column({ length: 32 })
-  workType: TimesheetWorkType;
 
   @Column({ type: 'numeric', precision: 5, scale: 2 })
   hoursSpent: string;

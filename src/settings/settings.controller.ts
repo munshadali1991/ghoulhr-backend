@@ -2,6 +2,8 @@ import {
   Controller,
   Get,
   Post,
+  Put,
+  Delete,
   Body,
   Param,
   UseGuards,
@@ -18,6 +20,11 @@ import {
 import { UpdateTimesheetSettingsDto } from './dto/timesheet-settings.dto';
 import { UpdateLocationConfigurationsDto } from './dto/location-configuration.dto';
 import { UpdateLeaveConfigurationsDto } from './dto/leave-configuration.dto';
+import {
+  CreateTimesheetCategoryDto,
+  UpdateTimesheetCategoryDto,
+} from './dto/timesheet-category.dto';
+import { TimesheetCategoryService } from './timesheet-category.service';
 import { TenantAuthGuard } from '../auth/guards/tenant-auth.guard';
 import type { TenantRequest } from '../common/middleware/tenant-resolver.middleware';
 
@@ -26,7 +33,10 @@ import type { TenantRequest } from '../common/middleware/tenant-resolver.middlew
 @UseGuards(TenantAuthGuard)
 @Controller('settings')
 export class SettingsController {
-  constructor(private readonly settingsService: SettingsService) {}
+  constructor(
+    private readonly settingsService: SettingsService,
+    private readonly timesheetCategoryService: TimesheetCategoryService,
+  ) {}
 
   // Specific routes MUST come before parameterized routes (:key)
 
@@ -112,6 +122,56 @@ export class SettingsController {
       req.tenantDataSource,
     );
     return { message: 'Timesheet settings updated successfully', settings };
+  }
+
+  @Get('timesheet/categories')
+  @ApiOperation({ summary: 'List timesheet categories (admin)' })
+  async getTimesheetCategories(@Req() req: TenantRequest) {
+    return this.timesheetCategoryService.listCategories(
+      req.tenantDataSource!,
+      req.organization!.id,
+    );
+  }
+
+  @Post('timesheet/categories')
+  @ApiOperation({ summary: 'Create timesheet category' })
+  async createTimesheetCategory(
+    @Req() req: TenantRequest,
+    @Body() dto: CreateTimesheetCategoryDto,
+  ) {
+    const category = await this.timesheetCategoryService.createCategory(
+      req.tenantDataSource!,
+      req.organization!.id,
+      dto,
+    );
+    return { message: 'Category created successfully', category };
+  }
+
+  @Put('timesheet/categories/:id')
+  @ApiOperation({ summary: 'Update timesheet category' })
+  async updateTimesheetCategory(
+    @Req() req: TenantRequest,
+    @Param('id') id: string,
+    @Body() dto: UpdateTimesheetCategoryDto,
+  ) {
+    const category = await this.timesheetCategoryService.updateCategory(
+      req.tenantDataSource!,
+      req.organization!.id,
+      id,
+      dto,
+    );
+    return { message: 'Category updated successfully', category };
+  }
+
+  @Delete('timesheet/categories/:id')
+  @ApiOperation({ summary: 'Delete timesheet category' })
+  async deleteTimesheetCategory(@Req() req: TenantRequest, @Param('id') id: string) {
+    await this.timesheetCategoryService.deleteCategory(
+      req.tenantDataSource!,
+      req.organization!.id,
+      id,
+    );
+    return { message: 'Category deleted successfully' };
   }
 
   @Get('locations')

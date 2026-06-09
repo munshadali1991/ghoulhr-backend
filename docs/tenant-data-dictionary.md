@@ -27,7 +27,8 @@
 - `employee_documents`: uploaded onboarding documents and verification state.
 - `employee_emergency_contacts`: emergency contacts.
 - `timesheet_days`: daily timesheet header per employee (`workDate`, `status`, `totalHours`, approval fields).
-- `timesheet_entries`: line-item work logs linked to `timesheet_days` (project name, task, hours, work type, status, priority).
+- `timesheet_categories`: org-scoped master for employee timesheet category dropdown (`name`, `isActive`, `sortOrder`).
+- `timesheet_entries`: line-item work logs linked to `timesheet_days` (`categoryId` → `timesheet_categories`, project name, task, hours, task status, priority).
 
 ### Timesheet configuration (via `organization_settings` keys)
 

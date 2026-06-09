@@ -9,11 +9,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import {
-  TimesheetPriority,
-  TimesheetTaskStatus,
-  TimesheetWorkType,
-} from '../../entities/timesheet-entry.entity';
+import { TimesheetPriority, TimesheetTaskStatus } from '../../entities/timesheet-entry.entity';
 
 export class TimesheetEntryDto {
   @ApiProperty({ required: false })
@@ -36,9 +32,9 @@ export class TimesheetEntryDto {
   @MaxLength(2000)
   taskDescription: string;
 
-  @ApiProperty({ enum: TimesheetWorkType })
-  @IsEnum(TimesheetWorkType)
-  workType: TimesheetWorkType;
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  categoryId: string;
 
   @ApiProperty({ example: 2.5 })
   @IsNumber()

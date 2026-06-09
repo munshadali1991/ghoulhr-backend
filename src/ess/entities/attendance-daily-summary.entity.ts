@@ -57,6 +57,15 @@ export class AttendanceDailySummary extends BaseEntity {
   @Column({ type: 'int', default: 0 })
   actualWorkMinutes: number;
 
+  @Column({ type: 'int', default: 0 })
+  workInShiftMinutes: number;
+
+  @Column({ type: 'int', default: 0 })
+  shortfallMinutes: number;
+
+  @Column({ type: 'int', default: 0 })
+  excessMinutes: number;
+
   @Column({ type: 'text', nullable: true })
   remarks?: string | null;
 

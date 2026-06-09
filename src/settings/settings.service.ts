@@ -7,6 +7,7 @@ import {
 import { DataSource, In, IsNull, Not, Repository } from 'typeorm';
 import { OrganizationSetting } from './entities/organization-setting.entity';
 import { WorkShiftConfiguration } from '../employees/entities/work-shift-configuration.entity';
+import { WorkShiftSession } from '../employees/entities/work-shift-session.entity';
 import {
   CreateSettingDto,
   UpdateOrgProfileDto,
@@ -338,7 +339,10 @@ export class SettingsService {
     return attendanceSettings;
   }
 
-  private workShiftToApiRow(row: WorkShiftConfiguration): Record<string, unknown> {
+  private workShiftToApiRow(
+    row: WorkShiftConfiguration,
+    sessions: WorkShiftSession[] = [],
+  ): Record<string, unknown> {
     const loc = row.location;
     const raw = row as unknown as Record<string, unknown>;
     const createdAt =
@@ -352,6 +356,11 @@ export class SettingsService {
       locationId: row.locationId,
       location_id: row.locationId,
       location: loc ? this.mapLocationConfigurationToApi(loc) : undefined,
+      sessions: sessions.map((s) => ({
+        sessionLabel: s.sessionLabel,
+        start_time: s.startTime,
+        end_time: s.endTime,
+      })),
       createdAt,
       updatedAt: readRowTimestamp(raw, 'updatedAt'),
     };
@@ -363,7 +372,26 @@ export class SettingsService {
     organizationId?: string,
   ): Promise<Record<string, unknown>[]> {
     const shiftRepo = dataSource.getRepository(WorkShiftConfiguration);
+    const sessionRepo = dataSource.getRepository(WorkShiftSession);
     const order = { sortOrder: 'ASC' as const, id: 'ASC' as const };
+
+    const loadWithSessions = async (rows: WorkShiftConfiguration[]) => {
+      if (rows.length === 0) return [];
+      const ids = rows.map((r) => r.id);
+      const sessionRows = await sessionRepo.find({
+        where: { shiftConfigurationId: In(ids) },
+        order: { sortOrder: 'ASC', id: 'ASC' },
+      });
+      const byShift = new Map<string, WorkShiftSession[]>();
+      for (const s of sessionRows) {
+        const list = byShift.get(s.shiftConfigurationId) ?? [];
+        list.push(s);
+        byShift.set(s.shiftConfigurationId, list);
+      }
+      return rows.map((row) =>
+        this.workShiftToApiRow(row, byShift.get(row.id) ?? []),
+      );
+    };
 
     if (organizationId) {
       const scoped = await shiftRepo.find({
@@ -371,12 +399,12 @@ export class SettingsService {
         order,
       });
       if (scoped.length > 0) {
-        return scoped.map((row) => this.workShiftToApiRow(row));
+        return loadWithSessions(scoped);
       }
     }
 
     const all = await shiftRepo.find({ order });
-    return all.map((row) => this.workShiftToApiRow(row));
+    return loadWithSessions(all);
   }
 
   /** One-time migration: legacy JSON shifts → work_shift_configurations (gets real timestamps). */
@@ -535,6 +563,7 @@ export class SettingsService {
 
       await dataSource.transaction(async (em) => {
         const wsRepo = em.getRepository(WorkShiftConfiguration);
+        const sessionRepo = em.getRepository(WorkShiftSession);
         const existing = await wsRepo.find({ where: { organizationId } });
         const incomingIds = new Set(
           dto.shifts
@@ -565,12 +594,31 @@ export class SettingsService {
               ? existing.find((r) => r.id === s.id)
               : undefined;
 
+          let saved: WorkShiftConfiguration;
           if (existingRow) {
-            await wsRepo.save({ ...existingRow, ...payload });
+            saved = await wsRepo.save({ ...existingRow, ...payload });
           } else if (s.id) {
-            await wsRepo.save(wsRepo.create({ id: s.id, ...payload }));
+            saved = await wsRepo.save(wsRepo.create({ id: s.id, ...payload }));
           } else {
-            await wsRepo.save(wsRepo.create(payload));
+            saved = await wsRepo.save(wsRepo.create(payload));
+          }
+
+          await sessionRepo.delete({ shiftConfigurationId: saved.id });
+          const sessionDefs = Array.isArray(s.sessions) ? s.sessions : [];
+          if (sessionDefs.length > 0) {
+            let sOrder = 0;
+            for (const sess of sessionDefs) {
+              await sessionRepo.save(
+                sessionRepo.create({
+                  shiftConfigurationId: saved.id,
+                  sessionLabel:
+                    sess.sessionLabel?.trim() || `Session ${sOrder + 1}`,
+                  startTime: sess.start_time,
+                  endTime: sess.end_time,
+                  sortOrder: sOrder++,
+                }),
+              );
+            }
           }
         }
 

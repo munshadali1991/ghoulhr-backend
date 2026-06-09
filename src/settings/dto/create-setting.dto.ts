@@ -237,6 +237,27 @@ export function ShiftTimeValid(validationOptions?: ValidationOptions) {
   };
 }
 
+export class ShiftSessionDto {
+  @ApiProperty({ example: 'Session 1', required: false })
+  @IsOptional()
+  @IsString()
+  sessionLabel?: string;
+
+  @ApiProperty({ example: '13:00' })
+  @IsString()
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
+    message: 'start_time must be in HH:mm format',
+  })
+  start_time: string;
+
+  @ApiProperty({ example: '17:30' })
+  @IsString()
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
+    message: 'end_time must be in HH:mm format',
+  })
+  end_time: string;
+}
+
 export class ShiftDto {
   @ApiProperty({
     example: '2e381f46-c73e-474c-b6cb-79ca3b280511',
@@ -281,6 +302,13 @@ export class ShiftDto {
   })
   @IsUUID()
   locationId: string;
+
+  @ApiProperty({ type: [ShiftSessionDto], required: false })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ShiftSessionDto)
+  sessions?: ShiftSessionDto[];
 }
 
 export class UpdateAttendanceSettingsDto {
