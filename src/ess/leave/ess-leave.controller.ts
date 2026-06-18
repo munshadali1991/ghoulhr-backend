@@ -11,6 +11,8 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { TenantAuthGuard } from '../../auth/guards/tenant-auth.guard';
+import { PermissionsGuard } from '../../rbac/guards/permissions.guard';
+import { RequirePermissions } from '../../rbac/decorators/require-permissions.decorator';
 import type { TenantRequest } from '../../common/middleware/tenant-resolver.middleware';
 import { CreateLeaveRequestDto } from './dto/create-leave-request.dto';
 import { GetLeaveBalancesQueryDto } from './dto/get-leave-balances-query.dto';
@@ -21,12 +23,13 @@ import { EssLeaveService } from './ess-leave.service';
 
 @ApiTags('ESS Leave')
 @ApiBearerAuth()
-@UseGuards(TenantAuthGuard)
+@UseGuards(TenantAuthGuard, PermissionsGuard)
 @Controller('ess/leave')
 export class EssLeaveController {
   constructor(private readonly essLeaveService: EssLeaveService) {}
 
   @Get('balances')
+  @RequirePermissions('ess.leave:read')
   @ApiOperation({ summary: 'Get employee leave balances and HR policy rules' })
   getBalances(
     @Req() req: TenantRequest,
@@ -41,6 +44,7 @@ export class EssLeaveController {
   }
 
   @Get('balances/:leaveConfigurationId')
+  @RequirePermissions('ess.leave:read')
   @ApiOperation({
     summary:
       'Get leave balance detail: summary KPIs, monthly chart, and transaction ledger',
@@ -60,6 +64,7 @@ export class EssLeaveController {
   }
 
   @Get('preview-days')
+  @RequirePermissions('ess.leave:read')
   @ApiOperation({ summary: 'Preview leave days and balance impact for apply form' })
   previewDays(
     @Req() req: TenantRequest,
@@ -74,6 +79,7 @@ export class EssLeaveController {
   }
 
   @Get('types')
+  @RequirePermissions('ess.leave:read')
   @ApiOperation({ summary: 'Get bookable leave types and approvers for the employee' })
   getLeaveTypes(@Req() req: TenantRequest) {
     return this.essLeaveService.getLeaveTypes(
@@ -84,6 +90,7 @@ export class EssLeaveController {
   }
 
   @Get('colleagues')
+  @RequirePermissions('ess.leave:read')
   @ApiOperation({ summary: 'Search active colleagues for leave Cc notifications' })
   searchColleagues(
     @Req() req: TenantRequest,
@@ -97,6 +104,7 @@ export class EssLeaveController {
   }
 
   @Get('requests')
+  @RequirePermissions('ess.leave:read')
   @ApiOperation({ summary: 'List own leave requests by status (pending or history)' })
   listRequests(
     @Req() req: TenantRequest,
@@ -111,6 +119,7 @@ export class EssLeaveController {
   }
 
   @Post('requests')
+  @RequirePermissions('ess.leave:apply')
   @ApiOperation({ summary: 'Submit a leave request with policy validation' })
   createRequest(
     @Req() req: TenantRequest,
@@ -125,6 +134,7 @@ export class EssLeaveController {
   }
 
   @Post('requests/:id/withdraw')
+  @RequirePermissions('ess.leave:apply')
   @ApiOperation({ summary: 'Withdraw a pending leave request' })
   withdrawRequest(
     @Req() req: TenantRequest,

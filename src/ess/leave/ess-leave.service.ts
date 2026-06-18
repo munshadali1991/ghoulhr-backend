@@ -27,6 +27,10 @@ import { LeaveNotificationService } from './leave-notification.service';
 import { resolveOrgTimezone } from '../../common/utils/org-timezone.util';
 import { OrganizationCalendarQueryService } from '../../settings/organization-calendar-query.service';
 import { SettingsService } from '../../settings/settings.service';
+import { AuthorizationService } from '../../rbac/authorization.service';
+import { EmployeeScopeService } from '../../rbac/employee-scope.service';
+import { RbacConfigService } from '../../rbac/rbac-config.service';
+import { AccessScope } from '../../rbac/constants/access-scope.enum';
 
 @Injectable()
 export class EssLeaveService {
@@ -40,6 +44,9 @@ export class EssLeaveService {
     private readonly leaveNotificationService: LeaveNotificationService,
     private readonly calendarQuery: OrganizationCalendarQueryService,
     private readonly settingsService: SettingsService,
+    private readonly authorizationService: AuthorizationService,
+    private readonly employeeScopeService: EmployeeScopeService,
+    private readonly rbacConfig: RbacConfigService,
   ) {}
 
   private async resolveOrgTimezone(
@@ -722,5 +729,215 @@ export class EssLeaveService {
           ? row.appliedOn
           : (row.appliedOn as Date).toISOString().slice(0, 10),
     };
+  }
+
+  async listPendingApprovals(
+    dataSource: DataSource,
+    organizationId: string,
+    approverEmployeeId: string,
+  ) {
+    const auth = await this.authorizationService.resolve({
+      employeeId: approverEmployeeId,
+      organizationId,
+      tenantDataSource: dataSource,
+    });
+
+    let rows = await dataSource.getRepository(LeaveRequest).find({
+      where: {
+        organizationId,
+        approverEmployeeId,
+        status: LeaveRequestStatus.PENDING,
+      },
+      relations: ['employee', 'leaveConfiguration', 'approver'],
+      order: { appliedOn: 'DESC' },
+    });
+
+    if (this.rbacConfig.isScopeV2Enabled()) {
+      const scope = auth.permissionScopes.get('approvals.leave:read') ?? AccessScope.SELF;
+      if (scope === AccessScope.ORGANIZATION || scope === AccessScope.GLOBAL) {
+        rows = await dataSource.getRepository(LeaveRequest).find({
+          where: { organizationId, status: LeaveRequestStatus.PENDING },
+          relations: ['employee', 'leaveConfiguration', 'approver'],
+          order: { appliedOn: 'DESC' },
+        });
+      } else {
+        const visibleIds = await this.employeeScopeService.getVisibleEmployeeIds(
+          dataSource,
+          approverEmployeeId,
+          'approvals.leave:read',
+          auth,
+        );
+        if (visibleIds) {
+          const scoped = await dataSource.getRepository(LeaveRequest).find({
+            where: {
+              organizationId,
+              status: LeaveRequestStatus.PENDING,
+              employeeId: In(visibleIds),
+            },
+            relations: ['employee', 'leaveConfiguration', 'approver'],
+            order: { appliedOn: 'DESC' },
+          });
+          const seen = new Set(rows.map((r) => r.id));
+          for (const row of scoped) {
+            if (!seen.has(row.id)) rows.push(row);
+          }
+        }
+      }
+    }
+
+    return rows.map((row) =>
+      this.mapRequestToApi(
+        row,
+        row.leaveConfiguration?.name ?? 'Leave',
+        row.approver?.name,
+        row.leaveConfiguration?.leaveCategory,
+      ),
+    );
+  }
+
+  private async findPendingLeaveForApprover(
+    em: EntityManager,
+    organizationId: string,
+    approverEmployeeId: string,
+    requestId: string,
+    dataSource: DataSource,
+  ): Promise<LeaveRequest | null> {
+    const requestRepo = em.getRepository(LeaveRequest);
+    const direct = await requestRepo.findOne({
+      where: {
+        id: requestId,
+        organizationId,
+        approverEmployeeId,
+        status: LeaveRequestStatus.PENDING,
+      },
+    });
+    if (direct) return direct;
+
+    if (!this.rbacConfig.isScopeV2Enabled()) {
+      return null;
+    }
+
+    const row = await requestRepo.findOne({
+      where: { id: requestId, organizationId, status: LeaveRequestStatus.PENDING },
+    });
+    if (!row) return null;
+
+    const auth = await this.authorizationService.resolve({
+      employeeId: approverEmployeeId,
+      organizationId,
+      tenantDataSource: dataSource,
+    });
+    const visibleIds = await this.employeeScopeService.getVisibleEmployeeIds(
+      dataSource,
+      approverEmployeeId,
+      'approvals.leave:act',
+      auth,
+    );
+    if (visibleIds && visibleIds.includes(row.employeeId)) {
+      return row;
+    }
+    return null;
+  }
+
+  async approveLeaveRequest(
+    dataSource: DataSource,
+    organizationId: string,
+    approverEmployeeId: string,
+    requestId: string,
+  ) {
+    return dataSource.transaction(async (em) => {
+      const requestRepo = em.getRepository(LeaveRequest);
+      const row = await this.findPendingLeaveForApprover(
+        em,
+        organizationId,
+        approverEmployeeId,
+        requestId,
+        dataSource,
+      );
+
+      if (!row) {
+        throw new NotFoundException('Pending leave request not found');
+      }
+
+      const year = new Date(
+        typeof row.startDate === 'string'
+          ? row.startDate
+          : (row.startDate as Date).toISOString().slice(0, 10),
+      ).getFullYear();
+
+      const balanceRepo = em.getRepository(EmployeeLeaveBalance);
+      const balance = await balanceRepo.findOne({
+        where: {
+          organizationId,
+          employeeId: row.employeeId,
+          leaveConfigurationId: row.leaveConfigurationId,
+          year,
+        },
+      });
+
+      const days = Number(row.daysCount);
+      if (balance) {
+        this.balanceService.decrementPending(balance, days);
+        balance.usedDays = String(
+          this.balanceService.roundDays(Number(balance.usedDays) + days),
+        );
+        await balanceRepo.save(balance);
+      }
+
+      row.status = LeaveRequestStatus.APPROVED;
+      await requestRepo.save(row);
+      return { success: true, status: row.status };
+    });
+  }
+
+  async rejectLeaveRequest(
+    dataSource: DataSource,
+    organizationId: string,
+    approverEmployeeId: string,
+    requestId: string,
+    reason?: string,
+  ) {
+    return dataSource.transaction(async (em) => {
+      const requestRepo = em.getRepository(LeaveRequest);
+      const row = await this.findPendingLeaveForApprover(
+        em,
+        organizationId,
+        approverEmployeeId,
+        requestId,
+        dataSource,
+      );
+
+      if (!row) {
+        throw new NotFoundException('Pending leave request not found');
+      }
+
+      const year = new Date(
+        typeof row.startDate === 'string'
+          ? row.startDate
+          : (row.startDate as Date).toISOString().slice(0, 10),
+      ).getFullYear();
+
+      const balanceRepo = em.getRepository(EmployeeLeaveBalance);
+      const balance = await balanceRepo.findOne({
+        where: {
+          organizationId,
+          employeeId: row.employeeId,
+          leaveConfigurationId: row.leaveConfigurationId,
+          year,
+        },
+      });
+
+      if (balance) {
+        this.balanceService.decrementPending(balance, Number(row.daysCount));
+        await balanceRepo.save(balance);
+      }
+
+      row.status = LeaveRequestStatus.REJECTED;
+      if (reason?.trim()) {
+        row.reason = `${row.reason ?? ''}\n[Rejection] ${reason.trim()}`.trim();
+      }
+      await requestRepo.save(row);
+      return { success: true, status: row.status };
+    });
   }
 }

@@ -13,14 +13,17 @@ import { EmployeesModule } from '../employees/employees.module';
 import { PasswordService } from '../common/services/password.service';
 import { DatabaseCoreModule } from '../core/database/database-core.module';
 import { RefreshSession } from './entities/refresh-session.entity';
+import { AuthHandoffToken } from './entities/auth-handoff-token.entity';
 import { RefreshSessionService } from './refresh-session.service';
 import { AuthCookieService } from './auth-cookie.service';
 import { AuthRefreshService } from './auth-refresh.service';
+import { AuthSessionService } from './auth-session.service';
+import { AuthHandoffService } from './auth-handoff.service';
 
 @Global()
 @Module({
   imports: [
-    TypeOrmModule.forFeature([RefreshSession]),
+    TypeOrmModule.forFeature([RefreshSession, AuthHandoffToken]),
     UsersModule,
     forwardRef(() => OrganizationsModule),
     forwardRef(() => EmployeesModule),
@@ -37,6 +40,8 @@ import { AuthRefreshService } from './auth-refresh.service';
     RefreshSessionService,
     AuthCookieService,
     AuthRefreshService,
+    AuthSessionService,
+    AuthHandoffService,
   ],
   exports: [
     AuthService,
@@ -44,6 +49,7 @@ import { AuthRefreshService } from './auth-refresh.service';
     AuthTokenGuard,
     RolesGuard,
     AuthCookieService,
+    AuthSessionService,
   ],
 })
 export class AuthModule {}

@@ -25,6 +25,11 @@ import { EmployeeEmergencyContact } from './entities/employee-emergency-contact.
 import { Department } from './entities/department.entity';
 import { Designation } from './entities/designation.entity';
 import { DesignationDepartment } from './entities/designation-department.entity';
+import { RbacSeedService } from '../rbac/rbac-seed.service';
+import {
+  employeeRoleToRoleCode,
+  portalRoleLabelToRoleCode,
+} from '../rbac/constants/permission-catalog.constant';
 
 export interface CreateEmployeeResult {
   employee: Employee;
@@ -42,6 +47,7 @@ export class EmployeesService {
     private readonly passwordService: PasswordService,
     private readonly settingsService: SettingsService,
     private readonly fieldEncryption: FieldEncryptionService,
+    private readonly rbacSeedService: RbacSeedService,
   ) {}
 
   /**
@@ -92,7 +98,9 @@ export class EmployeesService {
     );
 
     // Step 5: Generate temporary password
-    const temporaryPassword = this.passwordService.generateTemporaryPassword();
+    const temporaryPassword =
+      dto.initialPassword?.trim() ||
+      this.passwordService.generateTemporaryPassword();
     const hashedPassword =
       await this.passwordService.hashPassword(temporaryPassword);
     const passwordExpiresAt = this.passwordService.getTempPasswordExpiry();
@@ -134,6 +142,13 @@ export class EmployeesService {
     });
 
     const savedEmployee = await repo.save(employee);
+
+    await this.assignEmployeeRbacRole(
+      dataSource,
+      savedEmployee.id,
+      employeeRoleToRoleCode(savedEmployee.role),
+      createdBy,
+    );
 
     this.logger.log(
       `Employee created: ${savedEmployee.employeeCode} (${savedEmployee.email})`,
@@ -502,6 +517,13 @@ export class EmployeesService {
       `HR onboarding created: ${savedEmployee.employeeCode} (${savedEmployee.email})`,
     );
 
+    await this.assignEmployeeRbacRole(
+      dataSource,
+      savedEmployee.id,
+      portalRoleLabelToRoleCode(access.portalRoleLabel),
+      actorUuid,
+    );
+
     return {
       employee: savedEmployee,
       temporaryPassword,
@@ -754,8 +776,28 @@ export class EmployeesService {
   private mapPortalRoleToEmployeeRole(label: string): EmployeeRole {
     const u = (label || '').toUpperCase();
     if (u === 'MANAGER') return EmployeeRole.MANAGER;
-    if (['HR', 'PAYROLL', 'ADMIN'].includes(u)) return EmployeeRole.ORG_ADMIN;
+    if (u === 'ADMIN') return EmployeeRole.ORG_ADMIN;
     return EmployeeRole.EMPLOYEE;
+  }
+
+  private async assignEmployeeRbacRole(
+    dataSource: DataSource,
+    employeeId: string,
+    roleCode: string,
+    assignedBy?: string,
+  ): Promise<void> {
+    try {
+      await this.rbacSeedService.assignPrimarySystemRole(
+        dataSource,
+        employeeId,
+        roleCode,
+        assignedBy,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `RBAC assignment failed for employee ${employeeId}: ${(err as Error).message}`,
+      );
+    }
   }
 
   /**
@@ -956,9 +998,12 @@ export class EmployeesService {
   /**
    * Find all employees in tenant database
    */
-  async findAll(dataSource: DataSource): Promise<Record<string, unknown>[]> {
+  async findAll(
+    dataSource: DataSource,
+    visibleEmployeeIds?: string[] | null,
+  ): Promise<Record<string, unknown>[]> {
     const repo = dataSource.getRepository(Employee);
-    return repo
+    const qb = repo
       .createQueryBuilder('e')
       .leftJoin(Department, 'd', 'd.id = e.departmentId')
       .leftJoin(Designation, 'z', 'z.id = e.designationId')
@@ -976,9 +1021,13 @@ export class EmployeesService {
         'e.phoneNumber AS "phoneNumber"',
         'e.dateOfJoining AS "dateOfJoining"',
         'e.createdAt AS "createdAt"',
-      ])
-      .orderBy('e.createdAt', 'DESC')
-      .getRawMany();
+      ]);
+
+    if (visibleEmployeeIds) {
+      qb.andWhere('e.id IN (:...visibleEmployeeIds)', { visibleEmployeeIds });
+    }
+
+    return qb.orderBy('e.createdAt', 'DESC').getRawMany();
   }
 
   async updateEmployee(
@@ -1030,6 +1079,44 @@ export class EmployeesService {
     }
 
     return repo.save(employee);
+  }
+
+  /**
+   * Align org admin employee password with provisioned credentials before first login.
+   */
+  async syncOrgAdminInitialPassword(
+    employeeId: string,
+    password: string,
+    dataSource: DataSource,
+  ): Promise<void> {
+    const repo = dataSource.getRepository(Employee);
+    const employee = await repo.findOne({ where: { id: employeeId } });
+    if (!employee || employee.lastLoginAt) {
+      return;
+    }
+
+    const passwordMatches = await this.passwordService.verifyPassword(
+      password,
+      employee.password,
+    );
+
+    if (!passwordMatches) {
+      const hashedPassword = await this.passwordService.hashPassword(password);
+      await repo.update(employeeId, {
+        password: hashedPassword,
+        mustChangePassword: true,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      });
+      return;
+    }
+
+    if (employee.failedLoginAttempts > 0 || employee.lockedUntil) {
+      await repo.update(employeeId, {
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      });
+    }
   }
 
   /**

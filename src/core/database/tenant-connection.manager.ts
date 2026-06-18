@@ -2,6 +2,11 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { Organization } from '../../organizations/organization.entity';
+import { RbacRole } from '../../rbac/entities/rbac-role.entity';
+import { RbacPermission } from '../../rbac/entities/rbac-permission.entity';
+import { RbacRolePermission } from '../../rbac/entities/rbac-role-permission.entity';
+import { RbacEmployeeRoleAssignment } from '../../rbac/entities/rbac-employee-role-assignment.entity';
+import { RbacPermissionAuditLog } from '../../rbac/entities/rbac-permission-audit-log.entity';
 
 @Injectable()
 export class TenantConnectionManager implements OnModuleDestroy {
@@ -163,6 +168,12 @@ export class TenantConnectionManager implements OnModuleDestroy {
         __dirname + '/../../employees/entities/*.entity{.ts,.js}',
         __dirname + '/../../settings/entities/*.entity{.ts,.js}',
         __dirname + '/../../ess/entities/*.entity{.ts,.js}',
+        // Tenant RBAC only — exclude master-catalog entities (PlatformModule, OrganizationModuleEntitlement).
+        RbacRole,
+        RbacPermission,
+        RbacRolePermission,
+        RbacEmployeeRoleAssignment,
+        RbacPermissionAuditLog,
       ],
       migrations: [__dirname + '/../../migrations/tenant/*.js'],
       extra: {

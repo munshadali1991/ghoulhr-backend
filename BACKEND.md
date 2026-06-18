@@ -527,6 +527,16 @@ Run all tenants: `npm run tenant:migrate` → `scripts/run-tenant-migrations.cjs
 - `docs/db-standards.md` — naming and migration conventions  
 - `docs/tenant-data-dictionary.md` — table-level dictionary (note: schema names in doc reflect historical layout; runtime uses `public` after revert migration)
 
+## RBAC (Two-Tier Access Control)
+
+See `docs/RBAC.md` for full architecture.
+
+- **Layer 1 (master DB):** `platform_modules`, `organization_module_entitlements` — super admin enables/disables modules per org via `GET/PATCH /organizations/id/:id/modules`.
+- **Layer 2 (tenant DB):** `rbac_roles`, `rbac_permissions`, `rbac_role_permissions`, `rbac_employee_role_assignments` — org admin manages roles via `/rbac/*`.
+- **Effective access:** `org entitlement ∩ user permission` enforced by `PermissionsGuard` + `@RequirePermissions()`.
+- **Session:** `GET /auth/session` returns `{ user, entitledModules, permissions, roles }`.
+- **Feature flags:** `RBAC_ENFORCED`, `RBAC_SETTINGS_ENFORCED`, `RBAC_EMPLOYEES_ENFORCED` (default true).
+
 ## Current-State Notes
 
 - Swagger Bearer auth is optional; production clients should use cookies with `credentials: include`.

@@ -19,6 +19,8 @@ import { MigrationRunnerService } from '../core/database/migration-runner.servic
 import { EmployeesService } from '../employees/employees.service';
 import { ConfigService } from '@nestjs/config';
 import { OrganizationStatus } from './organization-status.enum';
+import { OrganizationEntitlementService } from '../rbac/organization-entitlement.service';
+import { RbacSeedService } from '../rbac/rbac-seed.service';
 
 @Injectable()
 export class OrganizationsService {
@@ -37,6 +39,8 @@ export class OrganizationsService {
     private readonly migrationRunner: MigrationRunnerService,
     private readonly employeesService: EmployeesService,
     private readonly configService: ConfigService,
+    private readonly entitlementService: OrganizationEntitlementService,
+    private readonly rbacSeedService: RbacSeedService,
   ) {}
 
   async create(dto: CreateOrganizationDto) {
@@ -58,10 +62,11 @@ export class OrganizationsService {
     let databaseCreated = false;
 
     try {
+      const { enabledModules, ...orgFields } = dto;
       // Step 1: Create organization record in master DB
       const assignedOrgPort = await this.getNextOrgPort();
       const organization = this.organizationRepo.create({
-        ...dto,
+        ...orgFields,
         monthlySubscriptionAmount: dto.monthlySubscriptionAmount ?? 0,
         dbName,
         dbHost,
@@ -95,6 +100,18 @@ export class OrganizationsService {
 
       this.logger.log(`Migrations completed on tenant database: ${dbName}`);
 
+      if (enabledModules?.length) {
+        await this.entitlementService.setOrganizationEntitlements(
+          savedOrganization.id,
+          enabledModules,
+        );
+      } else {
+        await this.entitlementService.enableAllModulesForOrganization(
+          savedOrganization.id,
+        );
+      }
+      await this.rbacSeedService.seedTenantRbac(tenantDataSource);
+
       const adminEmail = (savedOrganization.adminEmail || '')
         .trim()
         .toLowerCase();
@@ -103,6 +120,7 @@ export class OrganizationsService {
           savedOrganization,
           adminEmail,
         );
+        await this.ensureOrgAdminRbacRole(savedOrganization, adminEmail);
         if (adminProvisioned) {
           await this.emailService.sendAdminCredentials({
             to: adminEmail,
@@ -252,6 +270,7 @@ export class OrganizationsService {
     const adminEmail = (saved.adminEmail || '').trim().toLowerCase();
     if (adminEmail) {
       await this.ensureOrgAdminExists(saved, adminEmail);
+      await this.ensureOrgAdminRbacRole(saved, adminEmail);
     }
 
     return saved;
@@ -363,6 +382,7 @@ export class OrganizationsService {
 
     const result = await this.organizationRepo
       .createQueryBuilder('organization')
+      .withDeleted()
       .select('MAX(organization.orgPort)', 'max')
       .getRawOne<{ max: string | null }>();
 
@@ -412,10 +432,39 @@ export class OrganizationsService {
     const tenantDataSource =
       await this.tenantConnectionManager.getOrCreateConnection(next);
     await this.migrationRunner.runMigrations(tenantDataSource);
+    await this.entitlementService.ensureEntitlementsExist(next.id);
+    await this.rbacSeedService.seedTenantRbac(tenantDataSource);
 
     const adminEmail = (next.adminEmail || '').trim().toLowerCase();
     if (adminEmail) {
       await this.ensureOrgAdminExists(next, adminEmail);
+      await this.ensureOrgAdminRbacRole(next, adminEmail);
+    }
+  }
+
+  private async ensureOrgAdminRbacRole(
+    organization: Organization,
+    adminEmail: string,
+  ): Promise<void> {
+    try {
+      const tenantDataSource =
+        await this.tenantConnectionManager.getOrCreateConnection(organization);
+      const employee = await this.employeesService.findByEmail(
+        adminEmail,
+        tenantDataSource,
+      );
+      if (!employee) {
+        return;
+      }
+      await this.rbacSeedService.assignPrimarySystemRole(
+        tenantDataSource,
+        employee.id,
+        'ORG_ADMIN',
+      );
+    } catch (error) {
+      this.logger.warn(
+        `ORG_ADMIN RBAC assignment failed for "${organization.subdomain}": ${error.message}`,
+      );
     }
   }
 
@@ -429,6 +478,22 @@ export class OrganizationsService {
         role: Role.ORG_ADMIN,
       },
     });
+
+    const tenantDataSource =
+      await this.tenantConnectionManager.getOrCreateConnection(organization);
+    const existingEmployee = await this.employeesService.findByEmail(
+      adminEmail,
+      tenantDataSource,
+    );
+
+    if (existingEmployee) {
+      await this.employeesService.syncOrgAdminInitialPassword(
+        existingEmployee.id,
+        this.DEFAULT_ADMIN_PASSWORD,
+        tenantDataSource,
+      );
+    }
+
     if (existingOrgAdmin) {
       return false;
     }
@@ -453,22 +518,16 @@ export class OrganizationsService {
     });
 
     try {
-      const tenantDataSource =
-        await this.tenantConnectionManager.getOrCreateConnection(organization);
-      const existingEmployee = await this.employeesService.findByEmail(
-        adminEmail,
-        tenantDataSource,
-      );
       if (!existingEmployee) {
-        // Create ORG_ADMIN employee in tenant database
         await this.employeesService.create(
           {
             name: organization.adminName || organization.subdomain,
             email: adminEmail,
             role: 'ORG_ADMIN' as any,
+            initialPassword: this.DEFAULT_ADMIN_PASSWORD,
           },
           tenantDataSource,
-          masterUser.id, // createdBy
+          masterUser.id,
         );
       }
     } catch (error) {

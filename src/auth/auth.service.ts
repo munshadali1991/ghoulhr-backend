@@ -226,7 +226,7 @@ export class AuthService {
     });
 
     const refreshExpires = this.getRefreshExpiryDate();
-    const { plain: refreshPlain } =
+    const { plain: refreshPlain, id: refreshSessionId } =
       await this.refreshSessionService.issueMasterSession(
         userId,
         refreshExpires,
@@ -235,6 +235,7 @@ export class AuthService {
     return {
       accessToken,
       refreshPlain,
+      refreshSessionId,
       user: {
         id: userId,
         organizationId,

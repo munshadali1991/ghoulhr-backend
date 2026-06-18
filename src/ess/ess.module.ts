@@ -22,6 +22,7 @@ import { EssNotificationsController } from './notifications/ess-notifications.co
 import { EssNotificationsService } from './notifications/ess-notifications.service';
 import { EssTimesheetController } from './timesheet/ess-timesheet.controller';
 import { EssTimesheetService } from './timesheet/ess-timesheet.service';
+import { EssApprovalsController } from './approvals/ess-approvals.controller';
 
 @Module({
   imports: [EmployeesModule, SettingsModule, EmailModule],
@@ -33,6 +34,7 @@ import { EssTimesheetService } from './timesheet/ess-timesheet.service';
     EssHomeController,
     EssNotificationsController,
     EssTimesheetController,
+    EssApprovalsController,
   ],
   providers: [
     EssLeaveService,

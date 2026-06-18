@@ -13,6 +13,7 @@ import { ChangePasswordDto } from '../employees/dto/create-employee.dto';
 import { TenantAuthGuard } from './guards/tenant-auth.guard';
 import type { TenantRequest } from '../common/middleware/tenant-resolver.middleware';
 import { AuthCookieService } from './auth-cookie.service';
+import { AuthHandoffService } from './auth-handoff.service';
 
 @ApiTags('Tenant Auth')
 @Controller('auth')
@@ -20,6 +21,7 @@ export class TenantAuthController {
   constructor(
     private readonly tenantAuthService: TenantAuthService,
     private readonly authCookieService: AuthCookieService,
+    private readonly authHandoffService: AuthHandoffService,
   ) {}
 
   @Post('employee/login')
@@ -43,12 +45,33 @@ export class TenantAuthController {
       result.accessToken,
       result.refreshPlain,
     );
-    return {
+
+    const response: {
+      user: typeof result.user;
+      requiresPasswordChange?: boolean;
+      handoff?: string;
+    } = {
       user: result.user,
       ...(result.requiresPasswordChange
         ? { requiresPasswordChange: true }
         : {}),
     };
+
+    if (
+      this.authHandoffService.shouldIssueForLogin(
+        req.headers.host,
+        result.user.organizationSubdomain,
+        result.user.role,
+      )
+    ) {
+      const { code } = await this.authHandoffService.issue(
+        result.refreshSessionId,
+        result.user.organizationSubdomain!,
+      );
+      response.handoff = code;
+    }
+
+    return response;
   }
 
   @Post('change-password')

@@ -15,6 +15,7 @@ import { DatabaseCoreModule } from './core/database/database-core.module';
 import { EmployeesModule } from './employees/employees.module';
 import { SettingsModule } from './settings/settings.module';
 import { EssModule } from './ess/ess.module';
+import { RbacModule } from './rbac/rbac.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { EssModule } from './ess/ess.module';
     EmployeesModule,
     SettingsModule,
     EssModule,
+    RbacModule,
   ],
   controllers: [AppController],
   providers: [AppService],

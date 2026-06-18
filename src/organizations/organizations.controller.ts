@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -24,6 +25,9 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role } from '../roles/roles.enum';
 import { Organization } from './organization.entity';
+import { OrganizationEntitlementService } from '../rbac/organization-entitlement.service';
+import { SetOrganizationModulesDto } from '../rbac/dto/rbac.dto';
+import type { Request } from 'express';
 
 @ApiTags('Organizations')
 @ApiBearerAuth('bearer')
@@ -31,7 +35,10 @@ import { Organization } from './organization.entity';
 @UseGuards(AuthTokenGuard, RolesGuard)
 @Roles(Role.SUPER_ADMIN)
 export class OrganizationsController {
-  constructor(private readonly organizationsService: OrganizationsService) {}
+  constructor(
+    private readonly organizationsService: OrganizationsService,
+    private readonly entitlementService: OrganizationEntitlementService,
+  ) {}
 
   @Post()
   @ApiOperation({ summary: 'Create an organization tenant' })
@@ -120,5 +127,26 @@ export class OrganizationsController {
   @ApiResponse({ status: 404, description: 'Organization not found' })
   findBySubdomain(@Param('subdomain') subdomain: string) {
     return this.organizationsService.findBySubdomain(subdomain);
+  }
+
+  @Get('id/:id/modules')
+  @ApiOperation({ summary: 'List module entitlements for an organization' })
+  getModules(@Param('id') id: string) {
+    return this.entitlementService.getOrganizationEntitlements(id);
+  }
+
+  @Patch('id/:id/modules')
+  @ApiOperation({ summary: 'Set enabled modules for an organization' })
+  setModules(
+    @Param('id') id: string,
+    @Body() dto: SetOrganizationModulesDto,
+    @Req() req: Request,
+  ) {
+    const user = (req as any).user;
+    return this.entitlementService.setOrganizationEntitlements(
+      id,
+      dto.enabledModuleCodes,
+      user?.sub,
+    );
   }
 }

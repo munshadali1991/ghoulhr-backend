@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsEnum,
   IsNotEmpty,
   IsNumber,
@@ -226,4 +227,14 @@ export class CreateOrganizationDto {
   @IsOptional()
   @IsNumber()
   monthlySubscriptionAmount?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Platform module codes enabled for this organization. Defaults to all modules when omitted.',
+    example: ['employees', 'settings', 'leave'],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  enabledModules?: string[];
 }

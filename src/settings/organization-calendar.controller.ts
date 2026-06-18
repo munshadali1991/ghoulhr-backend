@@ -13,9 +13,8 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { TenantAuthGuard } from '../auth/guards/tenant-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../common/decorators/roles.decorator';
-import { EmployeeRole } from '../employees/employee.entity';
+import { PermissionsGuard } from '../rbac/guards/permissions.guard';
+import { RequirePermissions } from '../rbac/decorators/require-permissions.decorator';
 import type { TenantRequest } from '../common/middleware/tenant-resolver.middleware';
 import {
   CreateCalendarHolidayDto,
@@ -27,7 +26,7 @@ import { OrganizationCalendarService } from './organization-calendar.service';
 
 @ApiTags('Settings — Organization Calendar')
 @ApiBearerAuth()
-@UseGuards(TenantAuthGuard, RolesGuard)
+@UseGuards(TenantAuthGuard, PermissionsGuard)
 @Controller('settings/organization/calendar')
 export class OrganizationCalendarController {
   constructor(
@@ -35,6 +34,7 @@ export class OrganizationCalendarController {
   ) {}
 
   @Get()
+  @RequirePermissions('settings.organization:read')
   @ApiOperation({ summary: 'Get organization calendar and holidays for a year' })
   getCalendar(
     @Req() req: TenantRequest,
@@ -48,7 +48,7 @@ export class OrganizationCalendarController {
   }
 
   @Post('holidays')
-  @Roles(EmployeeRole.ORG_ADMIN)
+  @RequirePermissions('settings.organization:write')
   @ApiOperation({ summary: 'Add a holiday to the organization calendar' })
   createHoliday(
     @Req() req: TenantRequest,
@@ -62,7 +62,7 @@ export class OrganizationCalendarController {
   }
 
   @Patch('holidays/:id')
-  @Roles(EmployeeRole.ORG_ADMIN)
+  @RequirePermissions('settings.organization:write')
   @ApiOperation({ summary: 'Update a calendar holiday' })
   updateHoliday(
     @Req() req: TenantRequest,
@@ -78,7 +78,7 @@ export class OrganizationCalendarController {
   }
 
   @Delete('holidays/:id')
-  @Roles(EmployeeRole.ORG_ADMIN)
+  @RequirePermissions('settings.organization:write')
   @ApiOperation({ summary: 'Delete a calendar holiday' })
   deleteHoliday(
     @Req() req: TenantRequest,
@@ -92,7 +92,7 @@ export class OrganizationCalendarController {
   }
 
   @Post('publish')
-  @Roles(EmployeeRole.ORG_ADMIN)
+  @RequirePermissions('settings.organization:write')
   @ApiOperation({ summary: 'Publish the organization calendar for a year' })
   publish(
     @Req() req: TenantRequest,

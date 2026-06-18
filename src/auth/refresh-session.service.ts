@@ -25,9 +25,9 @@ export class RefreshSessionService {
   async issueMasterSession(
     masterUserId: string,
     expiresAt: Date,
-  ): Promise<{ plain: string }> {
+  ): Promise<{ plain: string; id: string }> {
     const plain = this.newRefreshPlain();
-    await this.refreshRepo.save(
+    const saved = await this.refreshRepo.save(
       this.refreshRepo.create({
         tokenHash: this.hashToken(plain),
         sessionKind: 'master',
@@ -39,16 +39,16 @@ export class RefreshSessionService {
         replacedBySessionId: null,
       }),
     );
-    return { plain };
+    return { plain, id: saved.id };
   }
 
   async issueEmployeeSession(
     employeeId: string,
     organizationId: string,
     expiresAt: Date,
-  ): Promise<{ plain: string }> {
+  ): Promise<{ plain: string; id: string }> {
     const plain = this.newRefreshPlain();
-    await this.refreshRepo.save(
+    const saved = await this.refreshRepo.save(
       this.refreshRepo.create({
         tokenHash: this.hashToken(plain),
         sessionKind: 'employee',
@@ -60,7 +60,11 @@ export class RefreshSessionService {
         replacedBySessionId: null,
       }),
     );
-    return { plain };
+    return { plain, id: saved.id };
+  }
+
+  async findById(id: string): Promise<RefreshSession | null> {
+    return this.refreshRepo.findOne({ where: { id } });
   }
 
   async findValidByPlain(plain: string): Promise<RefreshSession | null> {

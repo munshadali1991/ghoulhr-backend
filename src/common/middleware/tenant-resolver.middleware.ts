@@ -114,8 +114,12 @@ export class TenantResolverMiddleware implements NestMiddleware {
   }
 
   private extractMainDomain(host: string): string {
-    // Extract main domain from host (e.g., "ghoulhr.com" from "buggy.ghoulhr.com")
     const hostname = this.extractHostname(host);
+
+    if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+      return 'localhost';
+    }
+
     const domainParts = hostname.split('.');
 
     if (domainParts.length >= 2) {

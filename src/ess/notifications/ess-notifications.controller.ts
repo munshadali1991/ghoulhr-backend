@@ -9,12 +9,14 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { TenantAuthGuard } from '../../auth/guards/tenant-auth.guard';
+import { PermissionsGuard } from '../../rbac/guards/permissions.guard';
+import { RequireAnyPermission } from '../../rbac/decorators/require-permissions.decorator';
 import type { TenantRequest } from '../../common/middleware/tenant-resolver.middleware';
 import { EssNotificationsService } from './ess-notifications.service';
 
 @ApiTags('ESS Notifications')
 @ApiBearerAuth()
-@UseGuards(TenantAuthGuard)
+@UseGuards(TenantAuthGuard, PermissionsGuard)
 @Controller('ess/notifications')
 export class EssNotificationsController {
   constructor(
@@ -22,6 +24,7 @@ export class EssNotificationsController {
   ) {}
 
   @Get()
+  @RequireAnyPermission('ess.leave:read', 'ess.attendance:read', 'ess.timesheet:read')
   @ApiOperation({ summary: 'List notifications for the signed-in employee' })
   list(@Req() req: TenantRequest) {
     return this.essNotificationsService.list(
@@ -32,6 +35,7 @@ export class EssNotificationsController {
   }
 
   @Get('unread-count')
+  @RequireAnyPermission('ess.leave:read', 'ess.attendance:read', 'ess.timesheet:read')
   @ApiOperation({ summary: 'Unread notification count for header badge' })
   unreadCount(@Req() req: TenantRequest) {
     return this.essNotificationsService.getUnreadCount(
@@ -42,6 +46,7 @@ export class EssNotificationsController {
   }
 
   @Patch('read-all')
+  @RequireAnyPermission('ess.leave:read', 'ess.attendance:read', 'ess.timesheet:read')
   @ApiOperation({ summary: 'Mark all notifications as read' })
   markAllRead(@Req() req: TenantRequest) {
     return this.essNotificationsService.markAllRead(
@@ -52,6 +57,7 @@ export class EssNotificationsController {
   }
 
   @Patch(':id/read')
+  @RequireAnyPermission('ess.leave:read', 'ess.attendance:read', 'ess.timesheet:read')
   @ApiOperation({ summary: 'Mark a single notification as read' })
   markRead(
     @Req() req: TenantRequest,

@@ -112,6 +112,11 @@ export class CreateEmployeeDto {
   @IsOptional()
   @IsString()
   pfNumber?: string;
+
+  /** Internal — set known password during org admin provisioning (not for public API). */
+  @IsOptional()
+  @IsString()
+  initialPassword?: string;
 }
 
 export class EmployeeCredentialsResponseDto {

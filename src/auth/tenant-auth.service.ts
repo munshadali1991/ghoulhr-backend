@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { Employee, EmployeeStatus } from '../employees/employee.entity';
+import { EmployeeAccessControl } from '../employees/entities/employee-access.entity';
 import { EmployeesService } from '../employees/employees.service';
 import { PasswordService } from '../common/services/password.service';
 import { LoginDto } from './dto/login.dto';
@@ -19,6 +20,7 @@ import { RefreshSessionService } from './refresh-session.service';
 export interface TenantEmployeeLoginResponse {
   accessToken: string;
   refreshPlain: string;
+  refreshSessionId: string;
   user: {
     id: string;
     employeeCode: string;
@@ -239,6 +241,18 @@ export class TenantAuthService {
       throw new ForbiddenException('Your account has been terminated.');
     }
 
+    const accessControl = await targetDataSource
+      .getRepository(EmployeeAccessControl)
+      .createQueryBuilder('ac')
+      .where('ac.employeeId = :employeeId', { employeeId: employee.id })
+      .getOne();
+
+    if (accessControl && accessControl.hrmsAccessEnabled === false) {
+      throw new ForbiddenException(
+        'HRMS portal access is disabled for your account. Please contact HR.',
+      );
+    }
+
     // PENDING_ACTIVATION is allowed - employee needs to login to activate account and change password
 
     // Check if account is locked
@@ -265,7 +279,7 @@ export class TenantAuthService {
     });
 
     const refreshExpires = this.authService.getRefreshExpiryDate();
-    const { plain: refreshPlain } =
+    const { plain: refreshPlain, id: refreshSessionId } =
       await this.refreshSessionService.issueEmployeeSession(
         employee.id,
         targetOrganization.id,
@@ -275,6 +289,7 @@ export class TenantAuthService {
     const response: TenantEmployeeLoginResponse = {
       accessToken,
       refreshPlain,
+      refreshSessionId,
       user: {
         id: employee.id,
         employeeCode: employee.employeeCode,

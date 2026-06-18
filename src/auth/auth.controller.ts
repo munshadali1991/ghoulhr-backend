@@ -23,15 +23,22 @@ import { AuthResponseDto } from './dto/auth-response.dto';
 import { BootstrapSuperAdminDto } from './dto/bootstrap-super-admin.dto';
 import { AuthCookieService } from './auth-cookie.service';
 import { AuthRefreshService } from './auth-refresh.service';
-import { AuthTokenPayload } from './auth.types';
+import { AuthSessionService } from './auth-session.service';
+import { AuthHandoffService } from './auth-handoff.service';
+import { ConsumeHandoffDto } from './dto/consume-handoff.dto';
+import { TenantAuthService } from './tenant-auth.service';
+import type { TenantRequest } from '../common/middleware/tenant-resolver.middleware';
 
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
+    private readonly tenantAuthService: TenantAuthService,
     private readonly authCookieService: AuthCookieService,
     private readonly authRefreshService: AuthRefreshService,
+    private readonly authSessionService: AuthSessionService,
+    private readonly authHandoffService: AuthHandoffService,
   ) {}
 
   @Get('session')
@@ -40,13 +47,13 @@ export class AuthController {
   })
   @ApiResponse({ status: 200, description: 'Authenticated user profile' })
   @ApiResponse({ status: 401, description: 'Missing or invalid access token' })
-  getSession(@Req() req: Request) {
+  async getSession(@Req() req: Request) {
     const token = this.authCookieService.readAccessToken(req);
     if (!token) {
       throw new UnauthorizedException('Not authenticated');
     }
     const payload = this.authService.verifyAccessToken(token);
-    return { user: this.mapSessionUser(payload) };
+    return this.authSessionService.buildSessionResponse(payload);
   }
 
   @Post('refresh')
@@ -65,6 +72,24 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Logged out' })
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     return this.authRefreshService.logout(req, res);
+  }
+
+  @Post('handoff/consume')
+  @ApiOperation({
+    summary: 'Exchange a one-time handoff code for auth cookies on tenant host',
+  })
+  @ApiResponse({ status: 200, description: 'Cookies set on current API host' })
+  @ApiResponse({ status: 401, description: 'Invalid or expired handoff code' })
+  @ApiResponse({ status: 403, description: 'Handoff not valid for this host' })
+  async consumeHandoff(
+    @Body() dto: ConsumeHandoffDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { accessToken, refreshPlain } =
+      await this.authHandoffService.consume(dto.code, req.headers.host);
+    this.authCookieService.attachAuthCookies(res, accessToken, refreshPlain);
+    return { ok: true };
   }
 
   @Post('register')
@@ -98,23 +123,76 @@ export class AuthController {
   }
 
   @Post('login')
-  @ApiOperation({ summary: 'Login with tenant-scoped credentials' })
+  @ApiOperation({
+    summary: 'Unified tenant login (employee-first); super admin fallback',
+  })
   @ApiBody({ type: LoginDto })
   @ApiResponse({ status: 201, type: AuthResponseDto })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
   @ApiResponse({ status: 403, description: 'User inactive' })
   async login(
     @Body() dto: LoginDto,
-    @Req() req: Request,
+    @Req() req: TenantRequest,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.authService.login(dto, req);
+    let result: {
+      accessToken: string;
+      refreshPlain: string;
+      refreshSessionId: string;
+      user: {
+        organizationSubdomain?: string;
+        role: string;
+        [key: string]: unknown;
+      };
+      requiresPasswordChange?: boolean;
+    };
+
+    try {
+      const tenantResult = await this.tenantAuthService.login(
+        dto,
+        req.tenantDataSource,
+        req.organization,
+      );
+      result = tenantResult;
+    } catch (err) {
+      if (!(err instanceof UnauthorizedException)) {
+        throw err;
+      }
+      result = await this.authService.login(dto, req);
+    }
+
     this.authCookieService.attachAuthCookies(
       res,
       result.accessToken,
       result.refreshPlain,
     );
-    return { user: result.user };
+
+    const response: {
+      user: typeof result.user;
+      requiresPasswordChange?: boolean;
+      handoff?: string;
+    } = {
+      user: result.user,
+      ...(result.requiresPasswordChange
+        ? { requiresPasswordChange: true }
+        : {}),
+    };
+
+    if (
+      this.authHandoffService.shouldIssueForLogin(
+        req.headers.host,
+        result.user.organizationSubdomain,
+        result.user.role,
+      )
+    ) {
+      const { code } = await this.authHandoffService.issue(
+        result.refreshSessionId,
+        result.user.organizationSubdomain!,
+      );
+      response.handoff = code;
+    }
+
+    return response;
   }
 
   @Post('superadmin/bootstrap')
@@ -143,17 +221,5 @@ export class AuthController {
       result.refreshPlain,
     );
     return { user: result.user };
-  }
-
-  private mapSessionUser(payload: AuthTokenPayload) {
-    return {
-      id: payload.sub,
-      organizationId: payload.organizationId,
-      organizationSubdomain: payload.organizationSubdomain,
-      email: payload.email,
-      role: payload.role,
-      ...(payload.employeeCode ? { employeeCode: payload.employeeCode } : {}),
-      ...(payload.name ? { name: payload.name } : {}),
-    };
   }
 }

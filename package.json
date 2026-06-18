@@ -21,7 +21,8 @@
     "pm2:start:base": "pm2 start ecosystem.base.config.js --update-env",
     "pm2:sync:orgs": "node ./scripts/pm2-sync-organizations.cjs",
     "pm2:save": "pm2 save",
-    "tenant:migrate": "node scripts/run-tenant-migrations.cjs"
+    "tenant:migrate": "node scripts/run-tenant-migrations.cjs",
+    "fix:org-admin-login": "node scripts/fix-org-admin-login.cjs"
   },
   "engines": {
     "npm": ">=10.0.0",

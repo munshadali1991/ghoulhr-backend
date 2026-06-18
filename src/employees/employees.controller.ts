@@ -28,35 +28,49 @@ import {
 } from './dto/employee-onboarding.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { TenantAuthGuard } from '../auth/guards/tenant-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../common/decorators/roles.decorator';
-import { EmployeeRole } from './employee.entity';
+import { PermissionsGuard } from '../rbac/guards/permissions.guard';
+import { RequirePermissions } from '../rbac/decorators/require-permissions.decorator';
+import { AuthorizationService } from '../rbac/authorization.service';
+import { EmployeeScopeService } from '../rbac/employee-scope.service';
 import type { TenantRequest } from '../common/middleware/tenant-resolver.middleware';
 
 @ApiTags('Employees')
 @ApiBearerAuth()
 @Controller('employees')
-@UseGuards(TenantAuthGuard, RolesGuard)
+@UseGuards(TenantAuthGuard, PermissionsGuard)
 export class EmployeesController {
   private readonly logger = new Logger(EmployeesController.name);
 
   constructor(
     private readonly employeesService: EmployeesService,
     private readonly reportingManagersService: ReportingManagersService,
+    private readonly authorizationService: AuthorizationService,
+    private readonly employeeScopeService: EmployeeScopeService,
   ) {}
 
   @Get()
-  @Roles(EmployeeRole.ORG_ADMIN, EmployeeRole.MANAGER)
+  @RequirePermissions('employees:read')
   @ApiOperation({ summary: 'Get all employees in current tenant' })
   async findAll(@Req() req: TenantRequest) {
     this.logger.log(
       `Fetching all employees for tenant: ${req.organization?.subdomain}`,
     );
-    return this.employeesService.findAll(req.tenantDataSource);
+    const auth = await this.authorizationService.resolveCached(req, {
+      employeeId: req.user!.sub,
+      organizationId: req.organization!.id,
+      tenantDataSource: req.tenantDataSource!,
+    });
+    const visibleIds = await this.employeeScopeService.getVisibleEmployeeIds(
+      req.tenantDataSource!,
+      req.user!.sub,
+      'employees:read',
+      auth,
+    );
+    return this.employeesService.findAll(req.tenantDataSource!, visibleIds);
   }
 
   @Post('check-duplicate')
-  @Roles(EmployeeRole.ORG_ADMIN)
+  @RequirePermissions('employees:onboard')
   @ApiOperation({ summary: 'Check duplicate email / phone before onboarding' })
   async checkDuplicate(
     @Req() req: TenantRequest,
@@ -66,7 +80,7 @@ export class EmployeesController {
   }
 
   @Post('hr-onboarding')
-  @Roles(EmployeeRole.ORG_ADMIN)
+  @RequirePermissions('employees:onboard')
   @ApiOperation({ summary: 'Enterprise HR onboarding (modular persistence)' })
   async hrOnboarding(
     @Req() req: TenantRequest,
@@ -109,7 +123,7 @@ export class EmployeesController {
   }
 
   @Patch(':id/hr-onboarding')
-  @Roles(EmployeeRole.ORG_ADMIN)
+  @RequirePermissions('employees:onboard')
   @ApiOperation({ summary: 'Update employee via modular HR onboarding payload' })
   async updateHrOnboarding(
     @Req() req: TenantRequest,
@@ -132,7 +146,7 @@ export class EmployeesController {
   }
 
   @Get('reporting-managers')
-  @Roles(EmployeeRole.ORG_ADMIN, EmployeeRole.MANAGER)
+  @RequirePermissions('employees:reporting-manager:read')
   @ApiOperation({ summary: 'List employees with active reporting manager assignments' })
   async listReportingManagers(
     @Req() req: TenantRequest,
@@ -145,7 +159,7 @@ export class EmployeesController {
   }
 
   @Get(':id/reporting-manager')
-  @Roles(EmployeeRole.ORG_ADMIN, EmployeeRole.MANAGER)
+  @RequirePermissions('employees:reporting-manager:read')
   @ApiOperation({ summary: 'Get active reporting manager for an employee' })
   async getReportingManager(
     @Req() req: TenantRequest,
@@ -158,7 +172,7 @@ export class EmployeesController {
   }
 
   @Post(':id/reporting-manager')
-  @Roles(EmployeeRole.ORG_ADMIN)
+  @RequirePermissions('employees:reporting-manager:assign')
   @ApiOperation({ summary: 'Assign or change primary reporting manager' })
   async assignReportingManager(
     @Req() req: TenantRequest,
@@ -173,7 +187,7 @@ export class EmployeesController {
   }
 
   @Delete(':id/reporting-manager')
-  @Roles(EmployeeRole.ORG_ADMIN)
+  @RequirePermissions('employees:reporting-manager:assign')
   @ApiOperation({ summary: 'Remove active reporting manager assignment' })
   async removeReportingManager(
     @Req() req: TenantRequest,
@@ -184,12 +198,26 @@ export class EmployeesController {
   }
 
   @Get(':id')
-  @Roles(EmployeeRole.ORG_ADMIN, EmployeeRole.MANAGER)
+  @RequirePermissions('employees:read')
   @ApiOperation({ summary: 'Get employee by ID' })
   async findById(@Req() req: TenantRequest, @Param('id') id: string) {
     this.logger.log(
       `Fetching employee ${id} for tenant: ${req.organization?.subdomain}`,
     );
+    const auth = await this.authorizationService.resolveCached(req, {
+      employeeId: req.user!.sub,
+      organizationId: req.organization!.id,
+      tenantDataSource: req.tenantDataSource!,
+    });
+    const visibleIds = await this.employeeScopeService.getVisibleEmployeeIds(
+      req.tenantDataSource!,
+      req.user!.sub,
+      'employees:read',
+      auth,
+    );
+    if (visibleIds && !visibleIds.includes(id)) {
+      return { message: 'Employee not found' };
+    }
     const employee = await this.employeesService.findById(
       id,
       req.tenantDataSource,
@@ -201,7 +229,7 @@ export class EmployeesController {
   }
 
   @Post()
-  @Roles(EmployeeRole.ORG_ADMIN)
+  @RequirePermissions('employees:create')
   @ApiOperation({ summary: 'Create new employee in current tenant' })
   async create(
     @Req() req: TenantRequest,
@@ -214,7 +242,7 @@ export class EmployeesController {
     const result = await this.employeesService.create(
       dto,
       req.tenantDataSource,
-      req.user?.sub || '', // createdBy employee ID
+      req.user?.sub || '',
       req.organization?.id,
     );
 
@@ -243,7 +271,7 @@ export class EmployeesController {
   }
 
   @Post(':id/reset-password')
-  @Roles(EmployeeRole.ORG_ADMIN)
+  @RequirePermissions('employees:reset-password')
   @ApiOperation({ summary: 'Reset employee password (admin only)' })
   async resetPassword(
     @Req() req: TenantRequest,
@@ -266,7 +294,7 @@ export class EmployeesController {
   }
 
   @Patch(':id')
-  @Roles(EmployeeRole.ORG_ADMIN)
+  @RequirePermissions('employees:update')
   @ApiOperation({ summary: 'Update employee details (admin only)' })
   async updateEmployee(
     @Req() req: TenantRequest,

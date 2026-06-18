@@ -64,7 +64,23 @@ function resolveSubdomain(hostname) {
   return null;
 }
 
-async function resolveTarget(hostHeader) {
+function isAuthBootstrapPath(pathname) {
+  return (
+    pathname === '/auth/handoff/consume' ||
+    pathname === '/auth/session' ||
+    pathname === '/auth/refresh' ||
+    pathname === '/auth/login' ||
+    pathname === '/auth/employee/login'
+  );
+}
+
+async function resolveTarget(hostHeader, pathname = '') {
+  // Auth bootstrap endpoints use master DB (handoff tokens, session RBAC).
+  // Browser still calls {subdomain}.localhost:8080 so cookies stay on tenant host.
+  if (isAuthBootstrapPath(pathname)) {
+    return `http://127.0.0.1:${SUPERADMIN_PORT}`;
+  }
+
   const { hostname } = parseHost(hostHeader);
   if (!hostname) {
     return `http://127.0.0.1:${SUPERADMIN_PORT}`;
@@ -81,6 +97,17 @@ async function resolveTarget(hostHeader) {
 
   const subdomain = resolveSubdomain(hostname);
   if (!subdomain) {
+    const target = `http://127.0.0.1:${SUPERADMIN_PORT}`;
+    writeCache(hostname, target);
+    return target;
+  }
+
+  // Route tenant subdomains through superadmin; tenant is resolved from Host header.
+  const routeTenantsToSuperadmin =
+    (process.env.PROXY_ROUTE_TENANTS_TO_SUPERADMIN ?? 'true').toLowerCase() !==
+    'false';
+
+  if (routeTenantsToSuperadmin) {
     const target = `http://127.0.0.1:${SUPERADMIN_PORT}`;
     writeCache(hostname, target);
     return target;
@@ -128,7 +155,8 @@ async function start() {
     }
 
     try {
-      const target = await resolveTarget(req.headers.host);
+      const pathname = req.url?.split('?')[0] ?? '';
+      const target = await resolveTarget(req.headers.host, pathname);
       
       // Add CORS headers to all responses
       res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
@@ -149,7 +177,7 @@ async function start() {
 
   server.on('upgrade', async (req, socket, head) => {
     try {
-      const target = await resolveTarget(req.headers.host);
+      const target = await resolveTarget(req.headers.host, req.url?.split('?')[0] ?? '');
       proxy.ws(req, socket, head, { target });
     } catch {
       socket.destroy();

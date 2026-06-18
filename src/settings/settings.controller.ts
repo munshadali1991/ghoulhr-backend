@@ -26,11 +26,13 @@ import {
 } from './dto/timesheet-category.dto';
 import { TimesheetCategoryService } from './timesheet-category.service';
 import { TenantAuthGuard } from '../auth/guards/tenant-auth.guard';
+import { PermissionsGuard } from '../rbac/guards/permissions.guard';
+import { RequirePermissions, RequireAnyPermission } from '../rbac/decorators/require-permissions.decorator';
 import type { TenantRequest } from '../common/middleware/tenant-resolver.middleware';
 
 @ApiTags('Settings')
 @ApiBearerAuth()
-@UseGuards(TenantAuthGuard)
+@UseGuards(TenantAuthGuard, PermissionsGuard)
 @Controller('settings')
 export class SettingsController {
   constructor(
@@ -38,15 +40,15 @@ export class SettingsController {
     private readonly timesheetCategoryService: TimesheetCategoryService,
   ) {}
 
-  // Specific routes MUST come before parameterized routes (:key)
-
   @Get('profile')
+  @RequirePermissions('settings.organization:read')
   @ApiOperation({ summary: 'Get organization profile settings' })
   async getOrgProfile(@Req() req: TenantRequest) {
     return this.settingsService.getOrgProfile(req.tenantDataSource);
   }
 
   @Post('profile')
+  @RequirePermissions('settings.organization:write')
   @ApiOperation({ summary: 'Update organization profile settings' })
   async updateOrgProfile(
     @Req() req: TenantRequest,
@@ -60,6 +62,7 @@ export class SettingsController {
   }
 
   @Get('employee')
+  @RequirePermissions('settings.employees:read')
   @ApiOperation({ summary: 'Get employee settings' })
   async getEmployeeSettings(@Req() req: TenantRequest) {
     return this.settingsService.getEmployeeSettings(
@@ -69,6 +72,7 @@ export class SettingsController {
   }
 
   @Post('employee')
+  @RequirePermissions('settings.employees:write')
   @ApiOperation({ summary: 'Update employee settings (bulk update)' })
   async updateEmployeeSettings(
     @Req() req: TenantRequest,
@@ -83,6 +87,7 @@ export class SettingsController {
   }
 
   @Get('attendance')
+  @RequirePermissions('settings.attendance:read')
   @ApiOperation({ summary: 'Get attendance settings' })
   async getAttendanceSettings(@Req() req: TenantRequest) {
     return this.settingsService.getAttendanceSettings(
@@ -92,6 +97,7 @@ export class SettingsController {
   }
 
   @Post('attendance')
+  @RequirePermissions('settings.attendance:write')
   @ApiOperation({ summary: 'Update attendance settings (bulk update)' })
   async updateAttendanceSettings(
     @Req() req: TenantRequest,
@@ -106,12 +112,14 @@ export class SettingsController {
   }
 
   @Get('timesheet')
+  @RequirePermissions('settings.timesheet:read')
   @ApiOperation({ summary: 'Get timesheet settings' })
   async getTimesheetSettings(@Req() req: TenantRequest) {
     return this.settingsService.getTimesheetSettings(req.tenantDataSource);
   }
 
   @Post('timesheet')
+  @RequirePermissions('settings.timesheet:write')
   @ApiOperation({ summary: 'Update timesheet settings' })
   async updateTimesheetSettings(
     @Req() req: TenantRequest,
@@ -125,6 +133,7 @@ export class SettingsController {
   }
 
   @Get('timesheet/categories')
+  @RequirePermissions('settings.timesheet:read')
   @ApiOperation({ summary: 'List timesheet categories (admin)' })
   async getTimesheetCategories(@Req() req: TenantRequest) {
     return this.timesheetCategoryService.listCategories(
@@ -134,6 +143,7 @@ export class SettingsController {
   }
 
   @Post('timesheet/categories')
+  @RequirePermissions('settings.timesheet:write')
   @ApiOperation({ summary: 'Create timesheet category' })
   async createTimesheetCategory(
     @Req() req: TenantRequest,
@@ -148,6 +158,7 @@ export class SettingsController {
   }
 
   @Put('timesheet/categories/:id')
+  @RequirePermissions('settings.timesheet:write')
   @ApiOperation({ summary: 'Update timesheet category' })
   async updateTimesheetCategory(
     @Req() req: TenantRequest,
@@ -164,6 +175,7 @@ export class SettingsController {
   }
 
   @Delete('timesheet/categories/:id')
+  @RequirePermissions('settings.timesheet:write')
   @ApiOperation({ summary: 'Delete timesheet category' })
   async deleteTimesheetCategory(@Req() req: TenantRequest, @Param('id') id: string) {
     await this.timesheetCategoryService.deleteCategory(
@@ -175,6 +187,7 @@ export class SettingsController {
   }
 
   @Get('locations')
+  @RequirePermissions('settings.locations:read')
   @ApiOperation({ summary: 'List branch / location configurations for the organization' })
   async getLocationConfigurations(@Req() req: TenantRequest) {
     return this.settingsService.getLocationConfigurations(
@@ -184,6 +197,7 @@ export class SettingsController {
   }
 
   @Post('locations')
+  @RequirePermissions('settings.locations:write')
   @ApiOperation({ summary: 'Replace branch / location configurations for the organization' })
   async updateLocationConfigurations(
     @Req() req: TenantRequest,
@@ -201,6 +215,7 @@ export class SettingsController {
   }
 
   @Get('leave-config')
+  @RequirePermissions('settings.leave:read')
   @ApiOperation({
     summary: 'List leave type master rows (per branch) for the organization',
   })
@@ -212,6 +227,7 @@ export class SettingsController {
   }
 
   @Post('leave-config')
+  @RequirePermissions('settings.leave:write')
   @ApiOperation({
     summary: 'Replace leave type master rows for the organization',
   })
@@ -230,21 +246,43 @@ export class SettingsController {
     };
   }
 
-  // General routes (come after specific routes)
-
   @Get()
+  @RequireAnyPermission(
+    'settings.organization:read',
+    'settings.employees:read',
+    'settings.attendance:read',
+    'settings.timesheet:read',
+    'settings.locations:read',
+    'settings.leave:read',
+  )
   @ApiOperation({ summary: 'Get all settings for organization' })
   async getAllSettings(@Req() req: TenantRequest) {
     return this.settingsService.getAllSettings(req.tenantDataSource);
   }
 
   @Get(':key')
+  @RequireAnyPermission(
+    'settings.organization:read',
+    'settings.employees:read',
+    'settings.attendance:read',
+    'settings.timesheet:read',
+    'settings.locations:read',
+    'settings.leave:read',
+  )
   @ApiOperation({ summary: 'Get setting by key' })
   async getSetting(@Req() req: TenantRequest, @Param('key') key: string) {
     return this.settingsService.getSetting(key, req.tenantDataSource);
   }
 
   @Post()
+  @RequireAnyPermission(
+    'settings.organization:write',
+    'settings.employees:write',
+    'settings.attendance:write',
+    'settings.timesheet:write',
+    'settings.locations:write',
+    'settings.leave:write',
+  )
   @ApiOperation({ summary: 'Create or update a setting' })
   async setSetting(@Req() req: TenantRequest, @Body() dto: CreateSettingDto) {
     return this.settingsService.setSetting(

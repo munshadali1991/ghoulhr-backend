@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { DataSource, Between, EntityManager, IsNull } from 'typeorm';
 import { SettingsService } from '../../settings/settings.service';
@@ -21,6 +22,8 @@ import { TimesheetEntryReportQueryDto } from './dto/timesheet-entry-report-query
 import { EssAttendanceService } from '../attendance/ess-attendance.service';
 import { TimesheetCategoryService } from '../../settings/timesheet-category.service';
 import { TimesheetCategory } from '../entities/timesheet-category.entity';
+import { EmployeeScopeService } from '../../rbac/employee-scope.service';
+import { AuthorizationService } from '../../rbac/authorization.service';
 
 function parseDateKey(date: string): Date {
   const [y, m, d] = date.split('-').map(Number);
@@ -50,6 +53,8 @@ export class EssTimesheetService {
     private readonly settingsService: SettingsService,
     private readonly attendanceService: EssAttendanceService,
     private readonly categoryService: TimesheetCategoryService,
+    private readonly employeeScopeService: EmployeeScopeService,
+    private readonly authorizationService: AuthorizationService,
   ) {}
 
   async getCategories(dataSource: DataSource, organizationId: string) {
@@ -500,5 +505,124 @@ export class EssTimesheetService {
       totalHours: rows.reduce((acc, r) => acc + r.entry.hoursSpent, 0),
       rows,
     };
+  }
+
+  async listPendingApprovals(
+    dataSource: DataSource,
+    organizationId: string,
+    approverEmployeeId: string,
+  ) {
+    const auth = await this.authorizationService.resolve({
+      employeeId: approverEmployeeId,
+      organizationId,
+      tenantDataSource: dataSource,
+    });
+    const visibleIds = await this.employeeScopeService.getVisibleEmployeeIds(
+      dataSource,
+      approverEmployeeId,
+      'approvals.timesheet:read',
+      auth,
+    );
+
+    const qb = dataSource
+      .getRepository(TimesheetDay)
+      .createQueryBuilder('d')
+      .leftJoinAndSelect('d.employee', 'employee')
+      .where('d.organizationId = :organizationId', { organizationId })
+      .andWhere('d.status = :status', { status: TimesheetDayStatus.SUBMITTED });
+
+    if (visibleIds) {
+      qb.andWhere('d.employeeId IN (:...visibleIds)', { visibleIds });
+    }
+
+    const days = await qb.orderBy('d.workDate', 'DESC').getMany();
+
+    return days.map((day) => ({
+      id: day.id,
+      workDate: day.workDate,
+      status: day.status,
+      totalHours: Number(day.totalHours),
+      employeeId: day.employeeId,
+      employeeName: day.employee?.name,
+      submittedAt: day.submittedAt?.toISOString() ?? null,
+    }));
+  }
+
+  async approveTimesheetDay(
+    dataSource: DataSource,
+    organizationId: string,
+    approverEmployeeId: string,
+    dayId: string,
+  ) {
+    const day = await this.getApprovableDay(
+      dataSource,
+      organizationId,
+      approverEmployeeId,
+      dayId,
+    );
+
+    day.status = TimesheetDayStatus.APPROVED;
+    day.approvedAt = new Date();
+    day.approverEmployeeId = approverEmployeeId;
+    day.rejectedAt = null;
+    day.rejectionReason = null;
+    await dataSource.getRepository(TimesheetDay).save(day);
+    return { success: true, status: day.status };
+  }
+
+  async rejectTimesheetDay(
+    dataSource: DataSource,
+    organizationId: string,
+    approverEmployeeId: string,
+    dayId: string,
+    reason?: string,
+  ) {
+    const day = await this.getApprovableDay(
+      dataSource,
+      organizationId,
+      approverEmployeeId,
+      dayId,
+    );
+
+    day.status = TimesheetDayStatus.REJECTED;
+    day.rejectedAt = new Date();
+    day.approverEmployeeId = approverEmployeeId;
+    day.rejectionReason = reason?.trim() || null;
+    await dataSource.getRepository(TimesheetDay).save(day);
+    return { success: true, status: day.status };
+  }
+
+  private async getApprovableDay(
+    dataSource: DataSource,
+    organizationId: string,
+    approverEmployeeId: string,
+    dayId: string,
+  ): Promise<TimesheetDay> {
+    const day = await dataSource.getRepository(TimesheetDay).findOne({
+      where: { id: dayId, organizationId },
+      relations: ['employee'],
+    });
+
+    if (!day || day.status !== TimesheetDayStatus.SUBMITTED) {
+      throw new NotFoundException('Submitted timesheet day not found');
+    }
+
+    const auth = await this.authorizationService.resolve({
+      employeeId: approverEmployeeId,
+      organizationId,
+      tenantDataSource: dataSource,
+    });
+    const visibleIds = await this.employeeScopeService.getVisibleEmployeeIds(
+      dataSource,
+      approverEmployeeId,
+      'approvals.timesheet:act',
+      auth,
+    );
+
+    if (visibleIds && !visibleIds.includes(day.employeeId)) {
+      throw new ForbiddenException('You cannot act on this timesheet');
+    }
+
+    return day;
   }
 }
