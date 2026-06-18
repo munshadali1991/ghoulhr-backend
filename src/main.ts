@@ -32,6 +32,31 @@ function isAllowedCorsOrigin(origin?: string) {
   }
 }
 
+function matchesAllowedOrigin(origin: string, allowedOrigin: string) {
+  if (allowedOrigin === origin) {
+    return true;
+  }
+
+  if (!allowedOrigin.includes('*')) {
+    return false;
+  }
+
+  try {
+    const originUrl = new URL(origin);
+    const allowedUrl = new URL(allowedOrigin.replace('*.', 'placeholder.'));
+    if (originUrl.protocol !== allowedUrl.protocol) {
+      return false;
+    }
+
+    const wildcardHost = allowedOrigin
+      .replace(`${allowedUrl.protocol}//`, '')
+      .replace('*.', '');
+    return originUrl.hostname === wildcardHost || originUrl.hostname.endsWith(`.${wildcardHost}`);
+  } catch {
+    return false;
+  }
+}
+
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const configService = app.get(ConfigService);
@@ -63,7 +88,7 @@ async function bootstrap() {
         return;
       }
       if (webAppAllowlist.length > 0) {
-        if (webAppAllowlist.includes(origin)) {
+        if (webAppAllowlist.some((allowedOrigin) => matchesAllowedOrigin(origin, allowedOrigin))) {
           callback(null, origin);
           return;
         }
