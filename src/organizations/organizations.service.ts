@@ -21,6 +21,7 @@ import { ConfigService } from '@nestjs/config';
 import { OrganizationStatus } from './organization-status.enum';
 import { OrganizationEntitlementService } from '../rbac/organization-entitlement.service';
 import { RbacSeedService } from '../rbac/rbac-seed.service';
+import { TenantSslProvisioningService } from './tenant-ssl-provisioning.service';
 
 @Injectable()
 export class OrganizationsService {
@@ -41,6 +42,7 @@ export class OrganizationsService {
     private readonly configService: ConfigService,
     private readonly entitlementService: OrganizationEntitlementService,
     private readonly rbacSeedService: RbacSeedService,
+    private readonly tenantSslProvisioningService: TenantSslProvisioningService,
   ) {}
 
   async create(dto: CreateOrganizationDto) {
@@ -131,6 +133,10 @@ export class OrganizationsService {
           });
         }
       }
+
+      void this.tenantSslProvisioningService.provisionForSubdomain(
+        savedOrganization.subdomain,
+      );
 
       return savedOrganization;
     } catch (error) {

@@ -228,7 +228,8 @@ Employee login may return `requiresPasswordChange: true` when `mustChangePasswor
 2. `CREATE DATABASE` for tenant
 3. Connect tenant DS + `MigrationRunnerService.runMigrations()`
 4. If `adminEmail` set — provision tenant ORG_ADMIN (`EmployeesService`) and log credentials via `EmailService` (stub)
-5. On failure — drop tenant DB + delete master row
+5. Trigger optional SSL auto-provisioning for `${subdomain}.${SSL_AUTO_BASE_DOMAIN}` (non-blocking)
+6. On failure — drop tenant DB + delete master row
 
 `orgPort` assigned from `ORG_PORT_START` (default range starts `6000`).  
 Default provisioned admin password: `admin@123` (until changed).
@@ -498,6 +499,18 @@ Run all tenants: `npm run tenant:migrate` → `scripts/run-tenant-migrations.cjs
 | `SUPERADMIN_PORT` | Super-admin API port (default `3000`) |
 | `APP_DOMAIN` | Base domain for subdomain routing |
 | `PROXY_CACHE_TTL_MS` | Org lookup cache in proxy |
+
+### SSL auto-provisioning (optional)
+
+| Variable | Purpose |
+|----------|---------|
+| `SSL_AUTO_PROVISION_ENABLED` | Enable SSL provisioning on org create (`true`/`false`) |
+| `SSL_AUTO_BASE_DOMAIN` | Base domain appended to subdomain (e.g. `peopleaiq.com`) |
+| `SSL_AUTO_PROVISION_COMMAND` | Optional command with `{fqdn}` placeholder (example: `sudo /usr/local/bin/provision-tenant-ssl.sh {fqdn}`) |
+| `SSL_AUTO_PROVISION_SCRIPT` | Script path if command not set (default `/usr/local/bin/provision-tenant-ssl.sh`) |
+| `SSL_AUTO_PROVISION_TIMEOUT_MS` | Max execution time in milliseconds (default `180000`) |
+
+Reference script: `scripts/provision-tenant-ssl.sh`.
 
 ## NPM Scripts
 

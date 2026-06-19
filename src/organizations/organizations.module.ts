@@ -9,6 +9,7 @@ import { EmailModule } from '../modules/email';
 import { DatabaseCoreModule } from '../core/database/database-core.module';
 import { EmployeesModule } from '../employees/employees.module';
 import { OrganizationRuntimeBootstrapService } from './organization-runtime-bootstrap.service';
+import { TenantSslProvisioningService } from './tenant-ssl-provisioning.service';
 
 @Module({
   imports: [
@@ -18,7 +19,11 @@ import { OrganizationRuntimeBootstrapService } from './organization-runtime-boot
     DatabaseCoreModule,
     EmployeesModule,
   ],
-  providers: [OrganizationsService, OrganizationRuntimeBootstrapService],
+  providers: [
+    OrganizationsService,
+    OrganizationRuntimeBootstrapService,
+    TenantSslProvisioningService,
+  ],
   controllers: [OrganizationsController],
   exports: [OrganizationsService],
 })
