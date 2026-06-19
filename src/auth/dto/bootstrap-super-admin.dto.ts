@@ -19,7 +19,7 @@ export class BootstrapSuperAdminDto {
   @MinLength(8)
   password: string;
 
-  @ApiPropertyOptional({ example: 'GhoulHRMS' })
+  @ApiPropertyOptional({ example: 'peopleAIQ' })
   @IsOptional()
   @IsString()
   @IsNotEmpty()

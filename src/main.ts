@@ -118,8 +118,8 @@ async function bootstrap() {
     }),
   );
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('GhoulHRMS API')
-    .setDescription('API documentation for GhoulHRMS backend')
+    .setTitle('peopleAIQ API')
+    .setDescription('API documentation for peopleAIQ backend')
     .setVersion('1.0.0')
     .addBearerAuth(
       {

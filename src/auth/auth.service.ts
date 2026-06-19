@@ -145,7 +145,7 @@ export class AuthService {
       'Ghoul@123#';
     const organizationName =
       this.configService.get<string>('DEFAULT_ORGANIZATION_NAME') ??
-      'GhoulHRMS';
+      'peopleAIQ';
     const subdomain =
       this.configService.get<string>('DEFAULT_ORGANIZATION_SUBDOMAIN') ??
       'ghoulhr';

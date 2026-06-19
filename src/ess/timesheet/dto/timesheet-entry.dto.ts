@@ -17,7 +17,7 @@ export class TimesheetEntryDto {
   @IsUUID()
   id?: string;
 
-  @ApiProperty({ example: 'GhoulHR Platform' })
+  @ApiProperty({ example: 'peopleAIQ Platform' })
   @IsString()
   @MaxLength(120)
   projectName: string;
