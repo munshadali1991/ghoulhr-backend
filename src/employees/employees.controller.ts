@@ -158,6 +158,29 @@ export class EmployeesController {
     );
   }
 
+  @Get('reporting-manager-candidates')
+  @RequirePermissions('employees:reporting-manager:read')
+  @ApiOperation({
+    summary: 'List employees eligible to be assigned as reporting managers',
+  })
+  async listReportingManagerCandidates(@Req() req: TenantRequest) {
+    const auth = await this.authorizationService.resolveCached(req, {
+      employeeId: req.user!.sub,
+      organizationId: req.organization!.id,
+      tenantDataSource: req.tenantDataSource!,
+    });
+    const visibleIds = await this.employeeScopeService.getVisibleEmployeeIds(
+      req.tenantDataSource!,
+      req.user!.sub,
+      'employees:read',
+      auth,
+    );
+    return this.reportingManagersService.listManagerCandidates(
+      req.tenantDataSource!,
+      visibleIds,
+    );
+  }
+
   @Get(':id/reporting-manager')
   @RequirePermissions('employees:reporting-manager:read')
   @ApiOperation({ summary: 'Get active reporting manager for an employee' })

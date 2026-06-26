@@ -4,6 +4,8 @@ import { LeaveRequest, LeaveRequestStatus } from '../entities/leave-request.enti
 import { EssAttendanceService } from '../attendance/ess-attendance.service';
 import { EssHolidaysService } from '../holidays/ess-holidays.service';
 import { EssTimesheetService } from '../timesheet/ess-timesheet.service';
+import { EssLeaveService } from '../leave/ess-leave.service';
+import { AuthorizationService } from '../../rbac/authorization.service';
 import { getGreeting } from '../shared/ess-format.util';
 
 const STATIC_HOME = {
@@ -32,6 +34,8 @@ export class EssHomeService {
     private readonly attendanceService: EssAttendanceService,
     private readonly holidaysService: EssHolidaysService,
     private readonly timesheetService: EssTimesheetService,
+    private readonly leaveService: EssLeaveService,
+    private readonly authorizationService: AuthorizationService,
   ) {}
 
   async getHome(
@@ -67,6 +71,23 @@ export class EssHomeService {
       employeeId,
     );
 
+    const authContext = {
+      employeeId,
+      organizationId,
+      tenantDataSource: dataSource,
+    };
+    const canApproveLeave = await this.authorizationService.hasPermission(
+      authContext,
+      'approvals.leave:read',
+    );
+    const pendingApprovalLeaveCount = canApproveLeave
+      ? await this.leaveService.countPendingApprovalsForApprover(
+          dataSource,
+          organizationId,
+          employeeId,
+        )
+      : 0;
+
     return {
       greeting: getGreeting(),
       quote: STATIC_HOME.quote,
@@ -77,6 +98,7 @@ export class EssHomeService {
       itDeclaration: STATIC_HOME.itDeclaration,
       poi: STATIC_HOME.poi,
       pendingLeaveCount,
+      pendingApprovalLeaveCount,
       timesheet,
     };
   }

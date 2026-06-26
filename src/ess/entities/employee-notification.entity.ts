@@ -5,6 +5,9 @@ import { LeaveRequest } from './leave-request.entity';
 
 export enum EmployeeNotificationType {
   LEAVE_APPLIED = 'LEAVE_APPLIED',
+  LEAVE_PENDING_APPROVAL = 'LEAVE_PENDING_APPROVAL',
+  LEAVE_APPROVED = 'LEAVE_APPROVED',
+  LEAVE_REJECTED = 'LEAVE_REJECTED',
 }
 
 @Entity({ name: 'employee_notifications' })

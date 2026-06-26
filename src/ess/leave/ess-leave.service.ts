@@ -3,11 +3,18 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DataSource, EntityManager, In } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull } from 'typeorm';
 import { FieldEncryptionService } from '../../common/services/field-encryption.service';
 import { Employee, EmployeeStatus } from '../../employees/employee.entity';
+import {
+  EmployeeReportingManager,
+  REPORTING_MANAGER_TYPE_PRIMARY,
+} from '../../employees/entities/employee-reporting-manager.entity';
+import { findLeaveRequestsOverlappingRange } from './leave-request-query.util';
 import { EmployeeDocument } from '../../employees/entities/employee-document.entity';
 import { EmployeeEmploymentDetail } from '../../employees/entities/employee-employment-detail.entity';
+import { Department } from '../../employees/entities/department.entity';
+import { Designation } from '../../employees/entities/designation.entity';
 import { EmployeeLeaveBalance } from '../entities/employee-leave-balance.entity';
 import {
   LeaveRequest,
@@ -558,6 +565,14 @@ export class EssLeaveService {
         ccEmployeeIds,
       });
 
+      await this.leaveNotificationService.notifyApproverOnLeaveApplied(em, {
+        organizationId,
+        leaveRequest: saved,
+        applicant: employee,
+        approver,
+        leaveTypeName: policy.name,
+      });
+
       return {
         message: 'Leave request submitted successfully',
         request: this.mapRequestToApi(
@@ -724,6 +739,8 @@ export class EssLeaveService {
         endSession: row.endSession,
       },
       reason: row.reason ?? undefined,
+      rejectionReason: row.rejectionReason ?? undefined,
+      approvalNotes: row.approvalNotes ?? undefined,
       appliedOn:
         typeof row.appliedOn === 'string'
           ? row.appliedOn
@@ -731,11 +748,73 @@ export class EssLeaveService {
     };
   }
 
-  async listPendingApprovals(
+  private mapDocumentMeta(doc?: EmployeeDocument | null) {
+    if (!doc) return null;
+    return {
+      id: doc.id,
+      fileName: doc.fileName,
+      mimeType: doc.mimeType,
+      sizeBytes: doc.sizeBytes,
+    };
+  }
+
+  private async resolveEmployeeOrgLabels(
+    dataSource: DataSource,
+    employee?: Employee | null,
+  ): Promise<{ departmentName?: string; designationName?: string }> {
+    if (!employee) return {};
+
+    let departmentName = employee.departmentRef?.name;
+    let designationName = employee.designationRef?.name;
+
+    if (!departmentName && employee.departmentId) {
+      const dept = await dataSource.getRepository(Department).findOne({
+        where: { id: employee.departmentId },
+      });
+      departmentName = dept?.name;
+    }
+    if (!designationName && employee.designationId) {
+      const desig = await dataSource.getRepository(Designation).findOne({
+        where: { id: employee.designationId },
+      });
+      designationName = desig?.name;
+    }
+
+    return {
+      departmentName: departmentName ?? undefined,
+      designationName: designationName ?? undefined,
+    };
+  }
+
+  private async mapApprovalRequestToApi(
+    dataSource: DataSource,
+    row: LeaveRequest,
+  ) {
+    const labels = await this.resolveEmployeeOrgLabels(dataSource, row.employee);
+    const doc = this.mapDocumentMeta(row.supportingDocument);
+    return {
+      ...this.mapRequestToApi(
+        row,
+        row.leaveConfiguration?.name ?? 'Leave',
+        row.approver?.name,
+        row.leaveConfiguration?.leaveCategory,
+      ),
+      employeeId: row.employeeId,
+      employeeName: row.employee?.name ?? 'Employee',
+      employeeCode: row.employee?.employeeCode,
+      departmentName: labels.departmentName,
+      designationName: labels.designationName,
+      contactDetails: row.contactDetails ?? undefined,
+      supportingDocument: doc,
+      hasDocument: Boolean(doc),
+    };
+  }
+
+  private async findPendingApprovalRows(
     dataSource: DataSource,
     organizationId: string,
     approverEmployeeId: string,
-  ) {
+  ): Promise<LeaveRequest[]> {
     const auth = await this.authorizationService.resolve({
       employeeId: approverEmployeeId,
       organizationId,
@@ -748,7 +827,14 @@ export class EssLeaveService {
         approverEmployeeId,
         status: LeaveRequestStatus.PENDING,
       },
-      relations: ['employee', 'leaveConfiguration', 'approver'],
+      relations: [
+        'employee',
+        'employee.departmentRef',
+        'employee.designationRef',
+        'leaveConfiguration',
+        'approver',
+        'supportingDocument',
+      ],
       order: { appliedOn: 'DESC' },
     });
 
@@ -757,7 +843,14 @@ export class EssLeaveService {
       if (scope === AccessScope.ORGANIZATION || scope === AccessScope.GLOBAL) {
         rows = await dataSource.getRepository(LeaveRequest).find({
           where: { organizationId, status: LeaveRequestStatus.PENDING },
-          relations: ['employee', 'leaveConfiguration', 'approver'],
+          relations: [
+        'employee',
+        'employee.departmentRef',
+        'employee.designationRef',
+        'leaveConfiguration',
+        'approver',
+        'supportingDocument',
+      ],
           order: { appliedOn: 'DESC' },
         });
       } else {
@@ -774,7 +867,14 @@ export class EssLeaveService {
               status: LeaveRequestStatus.PENDING,
               employeeId: In(visibleIds),
             },
-            relations: ['employee', 'leaveConfiguration', 'approver'],
+            relations: [
+        'employee',
+        'employee.departmentRef',
+        'employee.designationRef',
+        'leaveConfiguration',
+        'approver',
+        'supportingDocument',
+      ],
             order: { appliedOn: 'DESC' },
           });
           const seen = new Set(rows.map((r) => r.id));
@@ -785,14 +885,285 @@ export class EssLeaveService {
       }
     }
 
-    return rows.map((row) =>
-      this.mapRequestToApi(
-        row,
-        row.leaveConfiguration?.name ?? 'Leave',
-        row.approver?.name,
-        row.leaveConfiguration?.leaveCategory,
-      ),
+    return rows;
+  }
+
+  async countPendingApprovalsForApprover(
+    dataSource: DataSource,
+    organizationId: string,
+    approverEmployeeId: string,
+  ): Promise<number> {
+    const rows = await this.findPendingApprovalRows(
+      dataSource,
+      organizationId,
+      approverEmployeeId,
     );
+    return rows.length;
+  }
+
+  async listPendingApprovals(
+    dataSource: DataSource,
+    organizationId: string,
+    approverEmployeeId: string,
+  ) {
+    const rows = await this.findPendingApprovalRows(
+      dataSource,
+      organizationId,
+      approverEmployeeId,
+    );
+
+    return Promise.all(
+      rows.map((row) => this.mapApprovalRequestToApi(dataSource, row)),
+    );
+  }
+
+  private async getTeamMemberIds(
+    dataSource: DataSource,
+    managerEmployeeId: string,
+  ): Promise<string[]> {
+    const reports = await dataSource
+      .getRepository(EmployeeReportingManager)
+      .find({
+        where: {
+          managerEmployeeId,
+          managerType: REPORTING_MANAGER_TYPE_PRIMARY,
+          effectiveTo: IsNull(),
+        },
+      });
+
+    const ids = reports
+      .map((r) => r.employeeId)
+      .filter((id): id is string => Boolean(id));
+
+    return [managerEmployeeId, ...ids];
+  }
+
+  private async findLeaveRequestForApproverRead(
+    dataSource: DataSource,
+    organizationId: string,
+    approverEmployeeId: string,
+    requestId: string,
+  ): Promise<LeaveRequest | null> {
+    const row = await dataSource.getRepository(LeaveRequest).findOne({
+      where: { id: requestId, organizationId },
+      relations: [
+        'employee',
+        'employee.departmentRef',
+        'employee.designationRef',
+        'leaveConfiguration',
+        'approver',
+        'supportingDocument',
+      ],
+    });
+    if (!row || row.status !== LeaveRequestStatus.PENDING) {
+      return null;
+    }
+
+    if (row.approverEmployeeId === approverEmployeeId) {
+      return row;
+    }
+
+    if (!this.rbacConfig.isScopeV2Enabled()) {
+      return null;
+    }
+
+    const auth = await this.authorizationService.resolve({
+      employeeId: approverEmployeeId,
+      organizationId,
+      tenantDataSource: dataSource,
+    });
+    const visibleIds = await this.employeeScopeService.getVisibleEmployeeIds(
+      dataSource,
+      approverEmployeeId,
+      'approvals.leave:read',
+      auth,
+    );
+    if (visibleIds && visibleIds.includes(row.employeeId)) {
+      return row;
+    }
+    return null;
+  }
+
+  async getLeaveApprovalDetail(
+    dataSource: DataSource,
+    organizationId: string,
+    approverEmployeeId: string,
+    requestId: string,
+  ) {
+    const row = await this.findLeaveRequestForApproverRead(
+      dataSource,
+      organizationId,
+      approverEmployeeId,
+      requestId,
+    );
+    if (!row) {
+      throw new NotFoundException('Pending leave request not found');
+    }
+
+    const year = new Date(
+      typeof row.startDate === 'string'
+        ? row.startDate
+        : (row.startDate as Date).toISOString().slice(0, 10),
+    ).getFullYear();
+
+    const startDate =
+      typeof row.startDate === 'string'
+        ? row.startDate
+        : (row.startDate as Date).toISOString().slice(0, 10);
+    const endDate =
+      typeof row.endDate === 'string'
+        ? row.endDate
+        : (row.endDate as Date).toISOString().slice(0, 10);
+
+    const labels = await this.resolveEmployeeOrgLabels(dataSource, row.employee);
+    const balancesData = await this.getBalances(
+      dataSource,
+      organizationId,
+      row.employeeId,
+      year,
+    );
+    const balanceSnapshotRow = balancesData.balances.find(
+      (b) => b.id === row.leaveConfigurationId,
+    );
+
+    const historyRows = await dataSource.getRepository(LeaveRequest).find({
+      where: {
+        organizationId,
+        employeeId: row.employeeId,
+        status: In([
+          LeaveRequestStatus.APPROVED,
+          LeaveRequestStatus.REJECTED,
+          LeaveRequestStatus.WITHDRAWN,
+        ]),
+      },
+      relations: ['leaveConfiguration'],
+      order: { appliedOn: 'DESC' },
+      take: 10,
+    });
+
+    const teamIds = await this.getTeamMemberIds(dataSource, approverEmployeeId);
+    const teamMemberIds = teamIds.filter((id) => id !== row.employeeId);
+    const teamLeaveRows =
+      teamMemberIds.length > 0
+        ? await findLeaveRequestsOverlappingRange(dataSource, {
+            organizationId,
+            employeeIds: teamMemberIds,
+            rangeStart: startDate,
+            rangeEnd: endDate,
+            relations: ['employee', 'leaveConfiguration'],
+          })
+        : [];
+
+    const configuredSteps = Array.isArray(row.leaveConfiguration?.approvalWorkflow)
+      ? row.leaveConfiguration!.approvalWorkflow!
+      : ['MANAGER'];
+
+    return {
+      request: await this.mapApprovalRequestToApi(dataSource, row),
+      employee: {
+        id: row.employeeId,
+        name: row.employee?.name ?? 'Employee',
+        employeeCode: row.employee?.employeeCode,
+        departmentName: labels.departmentName,
+        designationName: labels.designationName,
+      },
+      balanceSnapshot: balanceSnapshotRow
+        ? {
+            leaveConfigurationId: row.leaveConfigurationId,
+            leaveType: row.leaveConfiguration?.name ?? 'Leave',
+            year,
+            granted: balanceSnapshotRow.granted,
+            consumed: balanceSnapshotRow.consumed,
+            pending: balanceSnapshotRow.pending,
+            available: balanceSnapshotRow.balance,
+          }
+        : null,
+      allBalances: balancesData.balances.map((b) => ({
+        leaveType: b.name,
+        granted: b.granted,
+        consumed: b.consumed,
+        pending: b.pending,
+        available: b.balance,
+      })),
+      history: historyRows.map((h) => ({
+        id: h.id,
+        leaveType: h.leaveConfiguration?.name ?? 'Leave',
+        status: h.status,
+        daysCount: Number(h.daysCount),
+        duration: {
+          startDate:
+            typeof h.startDate === 'string'
+              ? h.startDate
+              : (h.startDate as Date).toISOString().slice(0, 10),
+          endDate:
+            typeof h.endDate === 'string'
+              ? h.endDate
+              : (h.endDate as Date).toISOString().slice(0, 10),
+          startSession: h.startSession,
+          endSession: h.endSession,
+        },
+        appliedOn:
+          typeof h.appliedOn === 'string'
+            ? h.appliedOn
+            : (h.appliedOn as Date).toISOString().slice(0, 10),
+      })),
+      teamCoverage: teamLeaveRows.map((t) => ({
+        employeeId: t.employeeId,
+        employeeName: t.employee?.name ?? 'Employee',
+        leaveType: t.leaveConfiguration?.name ?? 'Leave',
+        status: t.status,
+        startDate:
+          typeof t.startDate === 'string'
+            ? t.startDate
+            : (t.startDate as Date).toISOString().slice(0, 10),
+        endDate:
+          typeof t.endDate === 'string'
+            ? t.endDate
+            : (t.endDate as Date).toISOString().slice(0, 10),
+        daysCount: Number(t.daysCount),
+      })),
+      supportingDocument: this.mapDocumentMeta(row.supportingDocument),
+      workflow: {
+        currentStep: row.status,
+        assignedApproverName: row.approver?.name ?? 'Approver',
+        configuredSteps,
+      },
+    };
+  }
+
+  async getLeaveApprovalDocument(
+    dataSource: DataSource,
+    organizationId: string,
+    approverEmployeeId: string,
+    requestId: string,
+  ) {
+    const row = await this.findLeaveRequestForApproverRead(
+      dataSource,
+      organizationId,
+      approverEmployeeId,
+      requestId,
+    );
+    if (!row?.supportingDocumentId) {
+      throw new NotFoundException('Supporting document not found');
+    }
+
+    const doc = await dataSource.getRepository(EmployeeDocument).findOne({
+      where: { id: row.supportingDocumentId },
+    });
+    if (!doc?.payloadEnc) {
+      throw new NotFoundException('Supporting document not found');
+    }
+
+    const decrypted = this.fieldEncryption.decrypt(doc.payloadEnc);
+    if (!decrypted) {
+      throw new NotFoundException('Supporting document could not be read');
+    }
+
+    return {
+      fileName: doc.fileName,
+      mimeType: doc.mimeType,
+      dataBase64: decrypted,
+    };
   }
 
   private async findPendingLeaveForApprover(
@@ -844,6 +1215,7 @@ export class EssLeaveService {
     organizationId: string,
     approverEmployeeId: string,
     requestId: string,
+    notes?: string,
   ) {
     return dataSource.transaction(async (em) => {
       const requestRepo = em.getRepository(LeaveRequest);
@@ -859,23 +1231,31 @@ export class EssLeaveService {
         throw new NotFoundException('Pending leave request not found');
       }
 
+      const fullRow = await requestRepo.findOne({
+        where: { id: row.id },
+        relations: ['leaveConfiguration', 'employee', 'approver'],
+      });
+      if (!fullRow) {
+        throw new NotFoundException('Pending leave request not found');
+      }
+
       const year = new Date(
-        typeof row.startDate === 'string'
-          ? row.startDate
-          : (row.startDate as Date).toISOString().slice(0, 10),
+        typeof fullRow.startDate === 'string'
+          ? fullRow.startDate
+          : (fullRow.startDate as Date).toISOString().slice(0, 10),
       ).getFullYear();
 
       const balanceRepo = em.getRepository(EmployeeLeaveBalance);
       const balance = await balanceRepo.findOne({
         where: {
           organizationId,
-          employeeId: row.employeeId,
-          leaveConfigurationId: row.leaveConfigurationId,
+          employeeId: fullRow.employeeId,
+          leaveConfigurationId: fullRow.leaveConfigurationId,
           year,
         },
       });
 
-      const days = Number(row.daysCount);
+      const days = Number(fullRow.daysCount);
       if (balance) {
         this.balanceService.decrementPending(balance, days);
         balance.usedDays = String(
@@ -884,9 +1264,24 @@ export class EssLeaveService {
         await balanceRepo.save(balance);
       }
 
-      row.status = LeaveRequestStatus.APPROVED;
-      await requestRepo.save(row);
-      return { success: true, status: row.status };
+      fullRow.status = LeaveRequestStatus.APPROVED;
+      if (notes?.trim()) {
+        fullRow.approvalNotes = notes.trim();
+      }
+      await requestRepo.save(fullRow);
+
+      if (fullRow.employee) {
+        await this.leaveNotificationService.notifyApplicantOnDecision(em, {
+          organizationId,
+          leaveRequest: fullRow,
+          applicant: fullRow.employee,
+          leaveTypeName: fullRow.leaveConfiguration?.name ?? 'Leave',
+          decision: 'APPROVED',
+          notes: notes?.trim(),
+        });
+      }
+
+      return { success: true, status: fullRow.status };
     });
   }
 
@@ -911,33 +1306,53 @@ export class EssLeaveService {
         throw new NotFoundException('Pending leave request not found');
       }
 
+      const fullRow = await requestRepo.findOne({
+        where: { id: row.id },
+        relations: ['leaveConfiguration', 'employee', 'approver'],
+      });
+      if (!fullRow) {
+        throw new NotFoundException('Pending leave request not found');
+      }
+
       const year = new Date(
-        typeof row.startDate === 'string'
-          ? row.startDate
-          : (row.startDate as Date).toISOString().slice(0, 10),
+        typeof fullRow.startDate === 'string'
+          ? fullRow.startDate
+          : (fullRow.startDate as Date).toISOString().slice(0, 10),
       ).getFullYear();
 
       const balanceRepo = em.getRepository(EmployeeLeaveBalance);
       const balance = await balanceRepo.findOne({
         where: {
           organizationId,
-          employeeId: row.employeeId,
-          leaveConfigurationId: row.leaveConfigurationId,
+          employeeId: fullRow.employeeId,
+          leaveConfigurationId: fullRow.leaveConfigurationId,
           year,
         },
       });
 
       if (balance) {
-        this.balanceService.decrementPending(balance, Number(row.daysCount));
+        this.balanceService.decrementPending(balance, Number(fullRow.daysCount));
         await balanceRepo.save(balance);
       }
 
-      row.status = LeaveRequestStatus.REJECTED;
+      fullRow.status = LeaveRequestStatus.REJECTED;
       if (reason?.trim()) {
-        row.reason = `${row.reason ?? ''}\n[Rejection] ${reason.trim()}`.trim();
+        fullRow.rejectionReason = reason.trim();
       }
-      await requestRepo.save(row);
-      return { success: true, status: row.status };
+      await requestRepo.save(fullRow);
+
+      if (fullRow.employee) {
+        await this.leaveNotificationService.notifyApplicantOnDecision(em, {
+          organizationId,
+          leaveRequest: fullRow,
+          applicant: fullRow.employee,
+          leaveTypeName: fullRow.leaveConfiguration?.name ?? 'Leave',
+          decision: 'REJECTED',
+          notes: reason?.trim(),
+        });
+      }
+
+      return { success: true, status: fullRow.status };
     });
   }
 }

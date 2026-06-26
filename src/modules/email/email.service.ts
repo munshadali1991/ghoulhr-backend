@@ -25,6 +25,16 @@ export interface SendLeaveAppliedNotificationDto {
   body: string;
 }
 
+export interface SendLeaveApprovalRequestNotificationDto {
+  to: string;
+  approverName: string;
+  applicantName: string;
+  leaveType: string;
+  startDate: string;
+  endDate: string;
+  body: string;
+}
+
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
@@ -96,6 +106,37 @@ export class EmailService {
     );
     this.logger.log(
       `Applicant: ${params.applicantName}, type: ${params.leaveType}, ${params.startDate} – ${params.endDate}`,
+    );
+  }
+
+  /**
+   * Notify a manager that a leave request awaits their approval.
+   */
+  async sendLeaveApprovalRequestNotification(
+    params: SendLeaveApprovalRequestNotificationDto,
+  ): Promise<void> {
+    this.logger.log(
+      `Leave approval request to ${params.to} (${params.approverName}): ${params.body}`,
+    );
+    this.logger.log(
+      `Applicant: ${params.applicantName}, type: ${params.leaveType}, ${params.startDate} – ${params.endDate}. Review in Approvals > Leave Requests.`,
+    );
+  }
+
+  /**
+   * Notify an employee that their leave request was approved or rejected.
+   */
+  async sendLeaveDecisionNotification(params: {
+    to: string;
+    recipientName: string;
+    leaveType: string;
+    startDate: string;
+    endDate: string;
+    decision: 'APPROVED' | 'REJECTED';
+    body: string;
+  }): Promise<void> {
+    this.logger.log(
+      `Leave ${params.decision} notification to ${params.to} (${params.recipientName}): ${params.body}`,
     );
   }
 }

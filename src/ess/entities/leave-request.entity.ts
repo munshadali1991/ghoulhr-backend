@@ -56,6 +56,12 @@ export class LeaveRequest extends BaseEntity {
   @Column({ type: 'text', nullable: true })
   contactDetails?: string | null;
 
+  @Column({ type: 'text', nullable: true })
+  rejectionReason?: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  approvalNotes?: string | null;
+
   @Column({ type: 'uuid', nullable: true })
   approverEmployeeId?: string | null;
 

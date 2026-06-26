@@ -16,6 +16,7 @@ import type { TenantRequest } from '../../common/middleware/tenant-resolver.midd
 import { EssLeaveService } from '../leave/ess-leave.service';
 import { EssTimesheetService } from '../timesheet/ess-timesheet.service';
 import { RejectApprovalDto } from './dto/reject-approval.dto';
+import { ApproveApprovalDto } from './dto/approve-approval.dto';
 
 @ApiTags('ESS Approvals')
 @ApiBearerAuth()
@@ -38,18 +39,50 @@ export class EssApprovalsController {
     );
   }
 
+  @Get('leave/:id')
+  @RequirePermissions('approvals.leave:read')
+  @ApiOperation({ summary: 'Get leave approval detail for manager review' })
+  getLeaveApprovalDetail(
+    @Req() req: TenantRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.essLeaveService.getLeaveApprovalDetail(
+      req.tenantDataSource!,
+      req.organization!.id,
+      req.user!.sub,
+      id,
+    );
+  }
+
+  @Get('leave/:id/document')
+  @RequirePermissions('approvals.leave:read')
+  @ApiOperation({ summary: 'Download supporting document for a leave request' })
+  getLeaveApprovalDocument(
+    @Req() req: TenantRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.essLeaveService.getLeaveApprovalDocument(
+      req.tenantDataSource!,
+      req.organization!.id,
+      req.user!.sub,
+      id,
+    );
+  }
+
   @Post('leave/:id/approve')
   @RequirePermissions('approvals.leave:act')
   @ApiOperation({ summary: 'Approve a pending leave request' })
   approveLeave(
     @Req() req: TenantRequest,
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ApproveApprovalDto,
   ) {
     return this.essLeaveService.approveLeaveRequest(
       req.tenantDataSource!,
       req.organization!.id,
       req.user!.sub,
       id,
+      dto.notes,
     );
   }
 
