@@ -52,6 +52,8 @@ export function permissionResourceLabel(code: string): string {
     employees: 'Employees',
     'settings.organization': 'Organization profile',
     'settings.employees': 'Employee settings',
+    'settings.departments': 'Departments',
+    'settings.designations': 'Designations',
     'settings.attendance': 'Attendance settings',
     'settings.timesheet': 'Timesheet settings',
     'settings.locations': 'Locations',
@@ -63,6 +65,11 @@ export function permissionResourceLabel(code: string): string {
     'approvals.timesheet': 'Timesheet approvals',
     payroll: 'Payroll',
     rbac: 'Roles & Permissions',
+    'dashboard.ess': 'Employee home dashboard',
+    'dashboard.hr': 'HR organization dashboard',
+    'dashboard.manager': 'Manager dashboard',
+    'dashboard.payroll': 'Payroll dashboard',
+    'dashboard.approvals': 'Approvals dashboard',
   };
   return labels[resource] ?? resource.replace(/\./g, ' / ').replace(/-/g, ' ');
 }

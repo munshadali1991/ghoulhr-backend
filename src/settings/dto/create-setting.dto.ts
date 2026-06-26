@@ -152,6 +152,35 @@ export class UpdateEmployeeSettingsDto {
   designations?: EmployeeDesignationDto[];
 }
 
+export class UpdateDepartmentsDto {
+  @ApiProperty({
+    description: 'Department master data',
+    example: [{ id: 'uuid', name: 'Engineering', code: 'ENG', isActive: true }],
+  })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => EmployeeDepartmentDto)
+  departments: EmployeeDepartmentDto[];
+}
+
+export class UpdateDesignationsDto {
+  @ApiProperty({
+    description: 'Designation master data',
+    example: [
+      {
+        id: 'uuid',
+        name: 'Software Engineer',
+        departmentIds: ['uuid'],
+        isActive: true,
+      },
+    ],
+  })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => EmployeeDesignationDto)
+  designations: EmployeeDesignationDto[];
+}
+
 export class EmployeeDepartmentDto {
   @ApiProperty({ example: '5dc8f7bc-ecf1-459b-8a1b-2e6a5d7d0eb4' })
   @IsUUID()

@@ -21,6 +21,6 @@ export class RbacConfigService {
 
   /** Permission + scope resolver (department-aware authorization). */
   isScopeV2Enabled(): boolean {
-    return this.config.get<string>('RBAC_SCOPE_V2', 'false') === 'true';
+    return this.config.get<string>('RBAC_SCOPE_V2', 'true') === 'true';
   }
 }

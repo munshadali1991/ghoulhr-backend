@@ -90,7 +90,7 @@ Data filtering uses `AccessScopeResolver` when `RBAC_SCOPE_V2=true`. When `RBAC_
 ## Feature flags
 
 - `RBAC_ENFORCED` — master switch (default `true` in production)
-- `RBAC_SCOPE_V2` — permission + scope resolver (default `false`; set `true` to enable department-aware scoping)
+- `RBAC_SCOPE_V2` — permission + scope resolver (default `true`; set `false` to revert to legacy role-code scoping)
 - `RBAC_SETTINGS_ENFORCED` — settings route permissions
 - `RBAC_EMPLOYEES_ENFORCED` — employees route permissions
 
@@ -99,6 +99,26 @@ When disabled, `PermissionsGuard` passes through; `RolesGuard` remains as fallba
 ## Permission catalog
 
 Defined in `src/rbac/constants/permission-catalog.constant.ts`. Tenants cannot create custom permissions; they assign from this catalog within entitled modules.
+
+Sub-resources for org structure: `settings.departments:read/write`, `settings.designations:read/write`.
+
+Dashboard access (code-defined landing pages):
+
+| Permission | Dashboard | Route |
+|------------|-----------|-------|
+| `dashboard.ess:read` | Employee Home | `/home` |
+| `dashboard.hr:read` | HR / Org Admin | `/dashboard` |
+| `dashboard.manager:read` | Manager (future) | TBD |
+| `dashboard.payroll:read` | Payroll (future) | TBD |
+| `dashboard.approvals:read` | Approvals hub (future) | TBD |
+
+Grant `:read` without write permissions on underlying modules for view-only dashboard access; widgets and action buttons remain gated by their module permissions.
+
+`dashboard.hr:read` is granted only for org-admin style access (`employees:read` or `settings.organization:read`). **`payroll:read` alone does not grant the HR dashboard** — it maps to `dashboard.payroll:read` (future payroll dashboard).
+
+### Frontend access registry
+
+The frontend mirrors permission mappings in `frontend/ghoulhr/src/features/auth/config/accessRegistry.js`. Dashboard definitions live in `dashboardRegistry.js` — use these registries for nav, route guards, default landing path, and widget gating — do not hardcode permission strings in feature components.
 
 ## Data scoping
 

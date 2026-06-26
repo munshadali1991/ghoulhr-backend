@@ -22,10 +22,12 @@ export class RbacTenantBootstrapService implements OnModuleInit {
 
   async onModuleInit() {
     try {
+      await this.entitlementService.syncPlatformModulesFromCatalog();
       const orgs = await this.organizationsService.findAll();
       for (const org of orgs) {
         try {
           await this.entitlementService.ensureEntitlementsExist(org.id);
+          await this.entitlementService.ensureMissingModuleEntitlements(org.id);
           const ds = await this.tenantConnectionManager.getOrCreateConnection(org);
           await this.migrationRunner.runMigrations(ds);
           await this.rbacSeedService.seedTenantRbac(ds);

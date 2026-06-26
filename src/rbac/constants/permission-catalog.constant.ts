@@ -35,6 +35,10 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   perm('settings.organization:write', 'write', 'Update organization profile settings'),
   perm('settings.employees:read', 'read', 'View employee module settings'),
   perm('settings.employees:write', 'write', 'Update employee module settings'),
+  perm('settings.departments:read', 'read', 'View departments'),
+  perm('settings.departments:write', 'write', 'Create and update departments'),
+  perm('settings.designations:read', 'read', 'View designations'),
+  perm('settings.designations:write', 'write', 'Create and update designations'),
   perm('settings.attendance:read', 'read', 'View attendance settings'),
   perm('settings.attendance:write', 'write', 'Update attendance settings'),
   perm('settings.timesheet:read', 'read', 'View timesheet settings'),
@@ -63,6 +67,13 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   perm('payroll:write', 'write', 'Manage payroll configuration'),
   perm('payroll:run', 'run', 'Run payroll processing'),
 
+  // Dashboards
+  perm('dashboard.ess:read', 'read', 'View employee home dashboard'),
+  perm('dashboard.hr:read', 'read', 'View HR organization dashboard'),
+  perm('dashboard.manager:read', 'read', 'View manager dashboard'),
+  perm('dashboard.payroll:read', 'read', 'View payroll dashboard'),
+  perm('dashboard.approvals:read', 'read', 'View approvals dashboard'),
+
   // RBAC admin
   perm('rbac:read', 'read', 'View roles and permissions'),
   perm('rbac:manage', 'manage', 'Manage roles, permissions, and assignments'),
@@ -85,6 +96,7 @@ const ESS_PERMISSIONS = [
   'ess.attendance:punch',
   'ess.timesheet:read',
   'ess.timesheet:write',
+  'dashboard.ess:read',
 ];
 
 const MANAGER_PERMISSIONS = [
@@ -95,6 +107,8 @@ const MANAGER_PERMISSIONS = [
   'approvals.leave:act',
   'approvals.timesheet:read',
   'approvals.timesheet:act',
+  'dashboard.manager:read',
+  'dashboard.approvals:read',
 ];
 
 const HR_ADMIN_PERMISSIONS = [
@@ -104,8 +118,13 @@ const HR_ADMIN_PERMISSIONS = [
   'employees:onboard',
   'employees:reset-password',
   'employees:reporting-manager:assign',
+  'dashboard.hr:read',
   'settings.employees:read',
   'settings.employees:write',
+  'settings.departments:read',
+  'settings.departments:write',
+  'settings.designations:read',
+  'settings.designations:write',
   'settings.organization:read',
   'settings.locations:read',
   'settings.locations:write',
@@ -121,6 +140,8 @@ const PAYROLL_ADMIN_PERMISSIONS = [
   'payroll:read',
   'payroll:write',
   'payroll:run',
+  'dashboard.payroll:read',
+  'dashboard.hr:read',
 ];
 
 const ORG_ADMIN_PERMISSIONS = [...ALL_PERMISSION_CODES];
@@ -163,6 +184,7 @@ export const SYSTEM_ROLES: SystemRoleDefinition[] = [
       'employees:read',
       'approvals.leave:read',
       'approvals.leave:act',
+      'dashboard.approvals:read',
     ],
     isSystem: true,
   },

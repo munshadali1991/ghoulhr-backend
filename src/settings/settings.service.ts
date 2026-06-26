@@ -13,6 +13,8 @@ import {
   UpdateOrgProfileDto,
   UpdateEmployeeSettingsDto,
   UpdateAttendanceSettingsDto,
+  UpdateDepartmentsDto,
+  UpdateDesignationsDto,
   ShiftDto,
 } from './dto/create-setting.dto';
 import { SETTING_KEYS } from './settings.constants';
@@ -219,90 +221,169 @@ export class SettingsService {
       }
     }
 
-    if (dto.departments || dto.designations) {
-      await dataSource.transaction(async (em) => {
-        const departmentRepo = em.getRepository(Department);
-        const designationRepo = em.getRepository(Designation);
-        const designationDepartmentRepo = em.getRepository(DesignationDepartment);
-
-        if (dto.departments) {
-          const incomingIds = new Set(dto.departments.map((d) => d.id));
-          const existingDepartments = organizationId
-            ? await departmentRepo.find({ where: { organizationId } })
-            : await departmentRepo.find();
-
-          for (const dep of existingDepartments) {
-            if (!incomingIds.has(dep.id)) {
-              await departmentRepo.remove(dep);
-            }
-          }
-          for (const dep of dto.departments) {
-            await departmentRepo.save(
-              departmentRepo.create({
-                id: dep.id,
-                organizationId,
-                name: dep.name.trim(),
-                code: dep.code?.trim() || null,
-                isActive: dep.isActive,
-              }),
-            );
-          }
-        }
-
-        if (dto.designations) {
-          const incomingIds = new Set(dto.designations.map((d) => d.id));
-          const existingDesignations = organizationId
-            ? await designationRepo.find({ where: { organizationId } })
-            : await designationRepo.find();
-
-          for (const des of existingDesignations) {
-            if (!incomingIds.has(des.id)) {
-              await designationRepo.remove(des);
-            }
-          }
-          for (const des of dto.designations) {
-            await designationRepo.save(
-              designationRepo.create({
-                id: des.id,
-                organizationId,
-                name: des.name.trim(),
-                isActive: des.isActive,
-              }),
-            );
-          }
-
-          await designationDepartmentRepo.clear();
-          for (const des of dto.designations) {
-            for (const depId of des.departmentIds) {
-              await designationDepartmentRepo.save(
-                designationDepartmentRepo.create({
-                  organizationId,
-                  designationId: des.id,
-                  departmentId: depId,
-                }),
-              );
-            }
-          }
-        }
-      });
-
-      if (dto.departments) {
-        await this.setSetting(
-          SETTING_KEYS.EMPLOYEE_DEPARTMENTS,
-          dto.departments,
-          dataSource,
-        );
-      }
-      if (dto.designations) {
-        await this.setSetting(
-          SETTING_KEYS.EMPLOYEE_DESIGNATIONS,
-          dto.designations,
-          dataSource,
-        );
-      }
+    if (dto.departments !== undefined || dto.designations !== undefined) {
+      throw new BadRequestException(
+        'Departments and designations must be updated via /settings/departments and /settings/designations',
+      );
     }
 
     return updates;
+  }
+
+  async getDepartments(
+    dataSource: DataSource,
+    organizationId?: string,
+  ): Promise<{ departments: Record<string, unknown>[] }> {
+    const { departments } = await this.loadOrgStructure(dataSource, organizationId);
+    return { departments };
+  }
+
+  async getDesignations(
+    dataSource: DataSource,
+    organizationId?: string,
+  ): Promise<{ designations: Record<string, unknown>[] }> {
+    const { designations } = await this.loadOrgStructure(dataSource, organizationId);
+    return { designations };
+  }
+
+  async updateDepartments(
+    dto: UpdateDepartmentsDto,
+    dataSource: DataSource,
+    organizationId?: string,
+  ): Promise<{ departments: Record<string, unknown>[] }> {
+    await dataSource.transaction(async (em) => {
+      const departmentRepo = em.getRepository(Department);
+      const incomingIds = new Set(dto.departments.map((d) => d.id));
+      const existingDepartments = organizationId
+        ? await departmentRepo.find({ where: { organizationId } })
+        : await departmentRepo.find();
+
+      for (const dep of existingDepartments) {
+        if (!incomingIds.has(dep.id)) {
+          await departmentRepo.remove(dep);
+        }
+      }
+      for (const dep of dto.departments) {
+        await departmentRepo.save(
+          departmentRepo.create({
+            id: dep.id,
+            organizationId,
+            name: dep.name.trim(),
+            code: dep.code?.trim() || null,
+            isActive: dep.isActive,
+          }),
+        );
+      }
+    });
+
+    await this.setSetting(
+      SETTING_KEYS.EMPLOYEE_DEPARTMENTS,
+      dto.departments,
+      dataSource,
+    );
+
+    const { departments } = await this.loadOrgStructure(dataSource, organizationId);
+    return { departments };
+  }
+
+  async updateDesignations(
+    dto: UpdateDesignationsDto,
+    dataSource: DataSource,
+    organizationId?: string,
+  ): Promise<{ designations: Record<string, unknown>[] }> {
+    await dataSource.transaction(async (em) => {
+      const designationRepo = em.getRepository(Designation);
+      const designationDepartmentRepo = em.getRepository(DesignationDepartment);
+      const incomingIds = new Set(dto.designations.map((d) => d.id));
+      const existingDesignations = organizationId
+        ? await designationRepo.find({ where: { organizationId } })
+        : await designationRepo.find();
+
+      for (const des of existingDesignations) {
+        if (!incomingIds.has(des.id)) {
+          await designationRepo.remove(des);
+        }
+      }
+      for (const des of dto.designations) {
+        await designationRepo.save(
+          designationRepo.create({
+            id: des.id,
+            organizationId,
+            name: des.name.trim(),
+            isActive: des.isActive,
+          }),
+        );
+      }
+
+      if (organizationId) {
+        await designationDepartmentRepo.delete({ organizationId });
+      } else {
+        await designationDepartmentRepo.clear();
+      }
+      for (const des of dto.designations) {
+        for (const depId of des.departmentIds) {
+          await designationDepartmentRepo.save(
+            designationDepartmentRepo.create({
+              organizationId,
+              designationId: des.id,
+              departmentId: depId,
+            }),
+          );
+        }
+      }
+    });
+
+    await this.setSetting(
+      SETTING_KEYS.EMPLOYEE_DESIGNATIONS,
+      dto.designations,
+      dataSource,
+    );
+
+    const { designations } = await this.loadOrgStructure(dataSource, organizationId);
+    return { designations };
+  }
+
+  private async loadOrgStructure(
+    dataSource: DataSource,
+    organizationId?: string,
+  ): Promise<{
+    departments: Record<string, unknown>[];
+    designations: Record<string, unknown>[];
+  }> {
+    const departmentRepo = dataSource.getRepository(Department);
+    const designationRepo = dataSource.getRepository(Designation);
+    const mappingRepo = dataSource.getRepository(DesignationDepartment);
+
+    const whereByOrg = organizationId ? { organizationId } : {};
+    const [departments, designations, designationMappings] = await Promise.all([
+      departmentRepo.find({ where: whereByOrg, order: { name: 'ASC' } }),
+      designationRepo.find({ where: whereByOrg, order: { name: 'ASC' } }),
+      mappingRepo.find({ where: whereByOrg }),
+    ]);
+
+    const designationToDepartments = new Map<string, string[]>();
+    for (const row of designationMappings) {
+      const existing = designationToDepartments.get(row.designationId) || [];
+      existing.push(row.departmentId);
+      designationToDepartments.set(row.designationId, existing);
+    }
+
+    return {
+      departments: departments.map((d) => ({
+        id: d.id,
+        name: d.name,
+        code: d.code || undefined,
+        isActive: d.isActive,
+        createdAt: toIsoTimestamp(d.createdAt),
+      })),
+      designations: designations.map((d) => ({
+        id: d.id,
+        name: d.name,
+        departmentIds: designationToDepartments.get(d.id) || [],
+        isActive: d.isActive,
+        createdAt: toIsoTimestamp(d.createdAt),
+      })),
+    };
   }
 
   async getAttendanceSettings(

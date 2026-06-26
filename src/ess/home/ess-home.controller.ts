@@ -14,7 +14,7 @@ export class EssHomeController {
   constructor(private readonly homeService: EssHomeService) {}
 
   @Get()
-  @RequireAnyPermission('ess.leave:read', 'ess.attendance:read', 'ess.timesheet:read')
+  @RequireAnyPermission('dashboard.ess:read', 'ess.leave:read', 'ess.attendance:read', 'ess.timesheet:read')
   @ApiOperation({ summary: 'Employee home dashboard aggregate' })
   getHome(@Req() req: TenantRequest) {
     return this.homeService.getHome(

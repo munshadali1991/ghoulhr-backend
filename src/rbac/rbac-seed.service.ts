@@ -200,9 +200,155 @@ export class RbacSeedService {
 
     await this.backfillEmployeeAssignments(dataSource, roleByCode);
 
+    await this.migrateOrgStructurePermissions(dataSource, permByCode);
+    await this.migrateDashboardPermissions(dataSource, permByCode);
   }
 
+  /**
+   * Grant department/designation permissions to roles that already have employee settings write.
+   */
+  private async migrateOrgStructurePermissions(
+    dataSource: DataSource,
+    permByCode: Map<string, RbacPermission>,
+  ): Promise<void> {
+    const rpRepo = dataSource.getRepository(RbacRolePermission);
+    const employeesWrite = permByCode.get('settings.employees:write');
+    if (!employeesWrite) return;
 
+    const grantCodes = [
+      'settings.departments:read',
+      'settings.departments:write',
+      'settings.designations:read',
+      'settings.designations:write',
+    ];
+
+    const rowsWithEmployeesWrite = await rpRepo.find({
+      where: { permissionId: employeesWrite.id },
+    });
+
+    for (const row of rowsWithEmployeesWrite) {
+      for (const code of grantCodes) {
+        const perm = permByCode.get(code);
+        if (!perm) continue;
+
+        const exists = await rpRepo.findOne({
+          where: { roleId: row.roleId, permissionId: perm.id },
+        });
+        if (exists) continue;
+
+        await rpRepo.save(
+          rpRepo.create({
+            roleId: row.roleId,
+            permissionId: perm.id,
+            accessScope: row.accessScope,
+          }),
+        );
+      }
+    }
+  }
+
+  /** Grant dashboard permissions based on existing ESS or admin access. */
+  private async migrateDashboardPermissions(
+    dataSource: DataSource,
+    permByCode: Map<string, RbacPermission>,
+  ): Promise<void> {
+    const rpRepo = dataSource.getRepository(RbacRolePermission);
+    const permRepo = dataSource.getRepository(RbacPermission);
+    const allPerms = await permRepo.find();
+    const permById = new Map(allPerms.map((p) => [p.id, p.code]));
+    const allRolePerms = await rpRepo.find();
+
+    const roleToCodes = new Map<string, Set<string>>();
+    for (const row of allRolePerms) {
+      const code = permById.get(row.permissionId);
+      if (!code) continue;
+      const codes = roleToCodes.get(row.roleId) ?? new Set();
+      codes.add(code);
+      roleToCodes.set(row.roleId, codes);
+    }
+
+    for (const [roleId, codes] of roleToCodes) {
+      const codeList = [...codes];
+      const grants: string[] = [];
+
+      if (
+        codeList.some(
+          (c) =>
+            c.startsWith('ess.leave:') ||
+            c.startsWith('ess.attendance:') ||
+            c.startsWith('ess.timesheet:'),
+        )
+      ) {
+        grants.push('dashboard.ess:read');
+      }
+      if (
+        codeList.includes('employees:read') ||
+        codeList.includes('settings.organization:read')
+      ) {
+        grants.push('dashboard.hr:read');
+      }
+      if (
+        codeList.includes('approvals.leave:read') ||
+        codeList.includes('approvals.timesheet:read')
+      ) {
+        grants.push('dashboard.approvals:read');
+      }
+      if (codeList.includes('payroll:read')) {
+        grants.push('dashboard.payroll:read');
+      }
+      if (
+        codeList.includes('employees:read') &&
+        (codeList.includes('approvals.leave:act') ||
+          codeList.includes('approvals.timesheet:act'))
+      ) {
+        grants.push('dashboard.manager:read');
+      }
+
+      const sampleRow = allRolePerms.find((r) => r.roleId === roleId);
+      for (const code of [...new Set(grants)]) {
+        const perm = permByCode.get(code);
+        if (!perm) continue;
+        const exists = await rpRepo.findOne({
+          where: { roleId, permissionId: perm.id },
+        });
+        if (exists) continue;
+        await rpRepo.save(
+          rpRepo.create({
+            roleId,
+            permissionId: perm.id,
+            accessScope: sampleRow?.accessScope ?? AccessScope.ORGANIZATION,
+          }),
+        );
+      }
+    }
+
+    await this.revokeMisassignedHrDashboard(dataSource, permByCode, roleToCodes);
+  }
+
+  /**
+   * Remove dashboard.hr:read from roles that only qualified via payroll:read
+   * (payroll access belongs on dashboard.payroll:read, not the org admin dashboard).
+   */
+  private async revokeMisassignedHrDashboard(
+    dataSource: DataSource,
+    permByCode: Map<string, RbacPermission>,
+    roleToCodes: Map<string, Set<string>>,
+  ): Promise<void> {
+    const rpRepo = dataSource.getRepository(RbacRolePermission);
+    const hrDashboard = permByCode.get('dashboard.hr:read');
+    if (!hrDashboard) return;
+
+    for (const [roleId, codes] of roleToCodes) {
+      if (!codes.has('dashboard.hr:read')) continue;
+
+      const qualifies =
+        codes.has('employees:read') || codes.has('settings.organization:read');
+
+      if (!qualifies) {
+        await rpRepo.delete({ roleId, permissionId: hrDashboard.id });
+      }
+    }
+  }
 
   /** Upsert default access scopes for system role permissions. */
 
