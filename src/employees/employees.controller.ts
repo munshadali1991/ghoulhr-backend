@@ -248,7 +248,7 @@ export class EmployeesController {
     if (!employee) {
       return { message: 'Employee not found' };
     }
-    return employee;
+    return await this.employeesService.serializeEmployeeForResponse(employee);
   }
 
   @Post()

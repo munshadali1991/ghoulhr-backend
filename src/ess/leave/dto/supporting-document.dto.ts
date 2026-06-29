@@ -1,8 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
 export class SupportingDocumentDto {
-  @ApiProperty({ example: 'MEDICAL_CERTIFICATE' })
+  @ApiProperty({ example: 'LEAVE_SUPPORTING' })
   @IsString()
   @MaxLength(64)
   documentType: string;
@@ -17,8 +17,21 @@ export class SupportingDocumentDto {
   @MaxLength(128)
   mimeType: string;
 
-  @ApiPropertyOptional({ description: 'Base64-encoded file body' })
+  @ApiPropertyOptional({ description: 'Base64-encoded file body (legacy)' })
   @IsOptional()
   @IsString()
   dataBase64?: string;
+
+  @ApiPropertyOptional({ description: 'S3 object key from POST /storage/upload' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1024)
+  storageKey?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(15 * 1024 * 1024)
+  sizeBytes?: number;
 }

@@ -5,6 +5,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -15,6 +16,8 @@ import { RequirePermissions } from '../../rbac/decorators/require-permissions.de
 import type { TenantRequest } from '../../common/middleware/tenant-resolver.middleware';
 import { EssLeaveService } from '../leave/ess-leave.service';
 import { EssTimesheetService } from '../timesheet/ess-timesheet.service';
+import { TeamTimesheetQueryDto } from '../timesheet/dto/team-timesheet-query.dto';
+import { BulkApproveTimesheetDto } from './dto/bulk-approve-timesheet.dto';
 import { RejectApprovalDto } from './dto/reject-approval.dto';
 import { ApproveApprovalDto } from './dto/approve-approval.dto';
 
@@ -111,6 +114,51 @@ export class EssApprovalsController {
       req.tenantDataSource!,
       req.organization!.id,
       req.user!.sub,
+    );
+  }
+
+  @Get('timesheet/team')
+  @RequirePermissions('approvals.timesheet:read')
+  @ApiOperation({ summary: 'List team timesheet days for manager review' })
+  listTeamTimesheets(
+    @Req() req: TenantRequest,
+    @Query() query: TeamTimesheetQueryDto,
+  ) {
+    return this.essTimesheetService.listTeamTimesheetDays(
+      req.tenantDataSource!,
+      req.organization!.id,
+      req.user!.sub,
+      query,
+    );
+  }
+
+  @Post('timesheet/bulk-approve')
+  @RequirePermissions('approvals.timesheet:act')
+  @ApiOperation({ summary: 'Bulk approve submitted timesheet days' })
+  bulkApproveTimesheets(
+    @Req() req: TenantRequest,
+    @Body() dto: BulkApproveTimesheetDto,
+  ) {
+    return this.essTimesheetService.approveTimesheetDaysBulk(
+      req.tenantDataSource!,
+      req.organization!.id,
+      req.user!.sub,
+      dto,
+    );
+  }
+
+  @Get('timesheet/:id')
+  @RequirePermissions('approvals.timesheet:read')
+  @ApiOperation({ summary: 'Get timesheet approval detail for manager review' })
+  getTimesheetApprovalDetail(
+    @Req() req: TenantRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.essTimesheetService.getTimesheetApprovalDetail(
+      req.tenantDataSource!,
+      req.organization!.id,
+      req.user!.sub,
+      id,
     );
   }
 

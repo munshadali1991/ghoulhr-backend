@@ -88,6 +88,18 @@ export class EssHomeService {
         )
       : 0;
 
+    const canApproveTimesheet = await this.authorizationService.hasPermission(
+      authContext,
+      'approvals.timesheet:read',
+    );
+    const pendingApprovalTimesheetCount = canApproveTimesheet
+      ? await this.timesheetService.countPendingApprovalsForApprover(
+          dataSource,
+          organizationId,
+          employeeId,
+        )
+      : 0;
+
     return {
       greeting: getGreeting(),
       quote: STATIC_HOME.quote,
@@ -99,6 +111,7 @@ export class EssHomeService {
       poi: STATIC_HOME.poi,
       pendingLeaveCount,
       pendingApprovalLeaveCount,
+      pendingApprovalTimesheetCount,
       timesheet,
     };
   }

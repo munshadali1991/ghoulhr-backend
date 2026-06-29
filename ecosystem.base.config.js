@@ -1,3 +1,13 @@
+const dotenv = require('dotenv');
+const { pickStorageEnv } = require('./scripts/pm2-env-shared.cjs');
+
+dotenv.config({ path: `${__dirname}/.env` });
+
+const sharedNestEnv = {
+  NODE_ENV: process.env.NODE_ENV || 'local',
+  ...pickStorageEnv(),
+};
+
 module.exports = {
   apps: [
     {
@@ -9,7 +19,7 @@ module.exports = {
       watch: false,
       autorestart: true,
       env: {
-        NODE_ENV: process.env.NODE_ENV || 'local',
+        ...sharedNestEnv,
         PORT: process.env.SUPERADMIN_PORT || 3000,
         TENANT_LOCK_SUBDOMAIN: '',
       },

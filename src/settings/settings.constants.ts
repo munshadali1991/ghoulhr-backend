@@ -5,6 +5,7 @@ export const SETTING_KEYS = {
   ORG_CURRENCY: 'org.currency',
   ORG_DATE_FORMAT: 'org.date_format',
   ORG_LANGUAGE: 'org.language',
+  ORG_FINANCIAL_YEAR_START_MONTH: 'org.financial_year_start_month',
   EMPLOYEE_ID_PREFIX: 'employee.id_prefix',
   EMPLOYEE_AUTO_GENERATE_ID: 'employee.auto_generate_id',
   EMPLOYEE_REQUIRED_FIELDS: 'employee.required_fields',
@@ -47,6 +48,21 @@ export const SUPPORTED_DATE_FORMATS = [
 ] as const;
 
 export const SUPPORTED_LANGUAGES = ['en', 'hi', 'es', 'fr'] as const;
+
+export const SUPPORTED_FY_START_MONTHS = [
+  '1',
+  '2',
+  '3',
+  '4',
+  '5',
+  '6',
+  '7',
+  '8',
+  '9',
+  '10',
+  '11',
+  '12',
+] as const;
 
 export const ALLOWED_EMPLOYEE_FIELDS = [
   'name',

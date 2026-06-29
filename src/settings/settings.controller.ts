@@ -49,6 +49,14 @@ export class SettingsController {
     return this.settingsService.getOrgProfile(req.tenantDataSource);
   }
 
+  @Get('branding')
+  @ApiOperation({
+    summary: 'Organization name and logo for app shell (all authenticated users)',
+  })
+  async getOrgBranding(@Req() req: TenantRequest) {
+    return this.settingsService.getOrgBranding(req.tenantDataSource);
+  }
+
   @Post('profile')
   @RequirePermissions('settings.organization:write')
   @ApiOperation({ summary: 'Update organization profile settings' })
@@ -59,6 +67,7 @@ export class SettingsController {
     const updates = await this.settingsService.updateOrgProfile(
       dto,
       req.tenantDataSource,
+      req.organization?.id,
     );
     return { message: 'Profile updated successfully', updates };
   }

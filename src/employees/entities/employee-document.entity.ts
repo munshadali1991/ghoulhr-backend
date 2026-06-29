@@ -23,7 +23,11 @@ export class EmployeeDocument extends BaseEntity {
   @Column({ default: 'inline_base64' })
   storageDriver: string;
 
-  /** Encrypted base64 file body for inline storage (replace with S3 key later). */
+  /** Full S3 object key when storageDriver is s3. */
+  @Column({ type: 'varchar', length: 1024, nullable: true })
+  storageKey?: string | null;
+
+  /** Encrypted base64 file body for inline storage (legacy). */
   @Column({ type: 'text', nullable: true })
   payloadEnc?: string | null;
 

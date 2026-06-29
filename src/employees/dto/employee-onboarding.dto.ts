@@ -90,6 +90,17 @@ export class OnboardingBasicDto {
   @IsOptional()
   @IsString()
   profilePhotoUrl?: string;
+
+  @ApiPropertyOptional({ description: 'S3 storage key from POST /storage/upload' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1024)
+  profilePhotoStorageKey?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  profilePhotoFileName?: string;
 }
 
 export class OnboardingEmploymentDto {
@@ -354,11 +365,18 @@ export class OnboardingDocumentDto {
   @Max(15 * 1024 * 1024)
   sizeBytes: number;
 
-  /** Base64 payload for inline storage (MVP). Replace with signed upload URL later. */
+  /** Base64 payload for inline storage (legacy). Prefer storageKey for S3 uploads. */
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   dataBase64?: string;
+
+  /** S3 object key from POST /storage/upload */
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(1024)
+  storageKey?: string;
 }
 
 export class OnboardingEmergencyContactDto {
@@ -470,6 +488,15 @@ export class EmployeeOnboardingCreateDto {
   @Type(() => OnboardingDocumentDto)
   documents?: OnboardingDocumentDto[];
 
+  @ApiPropertyOptional({
+    description: 'Document IDs to remove (edit flow only)',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  deletedDocumentIds?: string[];
+
   @ApiProperty({ type: OnboardingAccessDto })
   @ValidateNested()
   @Type(() => OnboardingAccessDto)
@@ -491,4 +518,11 @@ export class CheckEmployeeDuplicateDto {
   @IsOptional()
   @IsString()
   mobileNumber?: string;
+
+  @ApiPropertyOptional({
+    description: 'When editing, exclude this employee from duplicate checks',
+  })
+  @IsOptional()
+  @IsUUID()
+  excludeEmployeeId?: string;
 }

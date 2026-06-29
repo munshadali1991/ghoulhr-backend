@@ -5,6 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { DataSource, Between, EntityManager, IsNull } from 'typeorm';
+import { Employee } from '../../employees/employee.entity';
+import { Department } from '../../employees/entities/department.entity';
+import { Designation } from '../../employees/entities/designation.entity';
 import { SettingsService } from '../../settings/settings.service';
 import {
   TimesheetDay,
@@ -17,8 +20,8 @@ import {
 } from './timesheet.constants';
 import { TimesheetEntryDto } from './dto/timesheet-entry.dto';
 import { UpsertTimesheetDayDto } from './dto/upsert-timesheet-day.dto';
-import { TimesheetReportQueryDto } from './dto/timesheet-report-query.dto';
-import { TimesheetEntryReportQueryDto } from './dto/timesheet-entry-report-query.dto';
+import { TeamTimesheetQueryDto } from './dto/team-timesheet-query.dto';
+import { BulkApproveTimesheetDto } from '../approvals/dto/bulk-approve-timesheet.dto';
 import { EssAttendanceService } from '../attendance/ess-attendance.service';
 import { TimesheetCategoryService } from '../../settings/timesheet-category.service';
 import { TimesheetCategory } from '../entities/timesheet-category.entity';
@@ -41,6 +44,20 @@ function addDays(dateKey: string, days: number): string {
   const d = parseDateKey(dateKey);
   d.setDate(d.getDate() + days);
   return formatDateKey(d);
+}
+
+function enumerateDates(from: string, to: string): string[] {
+  const dates: string[] = [];
+  let cursor = from;
+  while (cursor <= to) {
+    dates.push(cursor);
+    cursor = addDays(cursor, 1);
+  }
+  return dates;
+}
+
+function minDateKey(a: string, b: string): string {
+  return a <= b ? a : b;
 }
 
 function sumHours(entries: { hoursSpent: number }[]): number {
@@ -367,143 +384,339 @@ export class EssTimesheetService {
     };
   }
 
-  async getReports(
+  private async resolveEmployeeOrgLabels(
+    dataSource: DataSource,
+    employee?: Employee | null,
+  ): Promise<{ departmentName?: string; designationName?: string }> {
+    if (!employee) return {};
+
+    let departmentName = employee.departmentRef?.name;
+    let designationName = employee.designationRef?.name;
+
+    if (!departmentName && employee.departmentId) {
+      const dept = await dataSource.getRepository(Department).findOne({
+        where: { id: employee.departmentId },
+      });
+      departmentName = dept?.name;
+    }
+    if (!designationName && employee.designationId) {
+      const desig = await dataSource.getRepository(Designation).findOne({
+        where: { id: employee.designationId },
+      });
+      designationName = desig?.name;
+    }
+
+    return { departmentName, designationName };
+  }
+
+  private async getVisibleEmployeeIdsForApprover(
     dataSource: DataSource,
     organizationId: string,
-    employeeId: string,
-    query: TimesheetReportQueryDto,
-  ) {
-    const settings = await this.resolveSettings(dataSource);
-    const repo = dataSource.getRepository(TimesheetDay);
-    const days = await repo.find({
-      where: {
-        organizationId,
-        employeeId,
-        workDate: Between(query.from, query.to),
-      },
-      order: { workDate: 'ASC' },
+    approverEmployeeId: string,
+    permission: string,
+  ): Promise<string[] | null> {
+    const auth = await this.authorizationService.resolve({
+      employeeId: approverEmployeeId,
+      organizationId,
+      tenantDataSource: dataSource,
+    });
+    return this.employeeScopeService.getVisibleEmployeeIds(
+      dataSource,
+      approverEmployeeId,
+      permission,
+      auth,
+    );
+  }
+
+  private async getTimesheetDayForApproverRead(
+    dataSource: DataSource,
+    organizationId: string,
+    approverEmployeeId: string,
+    dayId: string,
+  ): Promise<TimesheetDay> {
+    const day = await dataSource.getRepository(TimesheetDay).findOne({
+      where: { id: dayId, organizationId },
+      relations: ['employee', 'employee.departmentRef', 'employee.designationRef', 'entries', 'entries.category', 'approver'],
     });
 
-    const dayRows = days.map((d) => ({
-      workDate: d.workDate,
-      totalHours: Number(d.totalHours),
-      status: d.status,
-      entryCount: 0,
-    }));
-
-    const totalHours = dayRows.reduce((acc, d) => acc + d.totalHours, 0);
-    const statusSummary: Record<string, number> = {};
-    for (const d of dayRows) {
-      const key = d.status ?? 'MISSING';
-      statusSummary[key] = (statusSummary[key] ?? 0) + 1;
+    if (!day) {
+      throw new NotFoundException('Timesheet day not found');
     }
 
-    let series: { label: string; totalHours: number; days: typeof dayRows }[] = [];
+    const visibleIds = await this.getVisibleEmployeeIdsForApprover(
+      dataSource,
+      organizationId,
+      approverEmployeeId,
+      'approvals.timesheet:read',
+    );
 
-    if (query.granularity === 'daily') {
-      series = dayRows.map((d) => ({
-        label: d.workDate,
-        totalHours: d.totalHours,
-        days: [d],
-      }));
-    } else if (query.granularity === 'weekly') {
-      const buckets = new Map<string, typeof dayRows>();
-      for (const row of dayRows) {
-        const d = parseDateKey(row.workDate);
-        const dayOfWeek = d.getDay();
-        const diff = (dayOfWeek - settings.weekStartsOn + 7) % 7;
-        const weekStart = addDays(row.workDate, -diff);
-        const bucket = buckets.get(weekStart) ?? [];
-        bucket.push(row);
-        buckets.set(weekStart, bucket);
-      }
-      series = [...buckets.entries()]
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([weekStart, rows]) => ({
-          label: weekStart,
-          totalHours: rows.reduce((acc, r) => acc + r.totalHours, 0),
-          days: rows,
-        }));
-    } else {
-      const buckets = new Map<string, typeof dayRows>();
-      for (const row of dayRows) {
-        const monthKey = row.workDate.slice(0, 7);
-        const bucket = buckets.get(monthKey) ?? [];
-        bucket.push(row);
-        buckets.set(monthKey, bucket);
-      }
-      series = [...buckets.entries()]
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([monthKey, rows]) => ({
-          label: monthKey,
-          totalHours: rows.reduce((acc, r) => acc + r.totalHours, 0),
-          days: rows,
-        }));
+    if (visibleIds && !visibleIds.includes(day.employeeId)) {
+      throw new ForbiddenException('You cannot view this timesheet');
     }
+
+    return day;
+  }
+
+  async countPendingApprovalsForApprover(
+    dataSource: DataSource,
+    organizationId: string,
+    approverEmployeeId: string,
+  ): Promise<number> {
+    const rows = await this.listPendingApprovals(
+      dataSource,
+      organizationId,
+      approverEmployeeId,
+    );
+    return rows.length;
+  }
+
+  async getTimesheetApprovalDetail(
+    dataSource: DataSource,
+    organizationId: string,
+    approverEmployeeId: string,
+    dayId: string,
+  ) {
+    const day = await this.getTimesheetDayForApproverRead(
+      dataSource,
+      organizationId,
+      approverEmployeeId,
+      dayId,
+    );
+    const settings = await this.resolveSettings(dataSource);
+    const labels = await this.resolveEmployeeOrgLabels(dataSource, day.employee);
+
+    const authContext = {
+      employeeId: approverEmployeeId,
+      organizationId,
+      tenantDataSource: dataSource,
+    };
+    const canActPermission = await this.authorizationService.hasPermission(
+      authContext,
+      'approvals.timesheet:act',
+    );
+    let canAct = canActPermission && day.status === TimesheetDayStatus.SUBMITTED;
+
+    if (canAct) {
+      const actVisibleIds = await this.getVisibleEmployeeIdsForApprover(
+        dataSource,
+        organizationId,
+        approverEmployeeId,
+        'approvals.timesheet:act',
+      );
+      if (actVisibleIds && !actVisibleIds.includes(day.employeeId)) {
+        canAct = false;
+      }
+    }
+
+    const mappedDay = this.mapDayToApi(day, settings);
 
     return {
-      from: query.from,
-      to: query.to,
-      granularity: query.granularity,
-      totalHours,
-      statusSummary,
-      days: dayRows,
-      series,
-      settings: {
-        maxHoursPerDay: settings.maxHoursPerDay,
-        weekStartsOn: settings.weekStartsOn,
+      employee: {
+        id: day.employeeId,
+        name: day.employee?.name ?? 'Employee',
+        employeeCode: day.employee?.employeeCode,
+        departmentName: labels.departmentName,
+        designationName: labels.designationName,
       },
+      day: {
+        ...mappedDay,
+        approverName: day.approver?.name ?? null,
+      },
+      canAct,
     };
   }
 
-  async getReportEntries(
+  async listTeamTimesheetDays(
     dataSource: DataSource,
     organizationId: string,
-    employeeId: string,
-    query: TimesheetEntryReportQueryDto,
+    approverEmployeeId: string,
+    query: TeamTimesheetQueryDto,
   ) {
     if (query.from > query.to) {
       throw new BadRequestException('"from" must be on or before "to".');
     }
 
-    const repo = dataSource.getRepository(TimesheetDay);
-    const days = await repo.find({
-      where: {
-        organizationId,
-        employeeId,
-        workDate: Between(query.from, query.to),
-      },
-      relations: ['entries', 'entries.category'],
-      order: { workDate: 'DESC' },
-    });
+    const visibleIds = await this.getVisibleEmployeeIdsForApprover(
+      dataSource,
+      organizationId,
+      approverEmployeeId,
+      'approvals.timesheet:read',
+    );
 
-    const rows: {
+    const actVisibleIds = await this.getVisibleEmployeeIdsForApprover(
+      dataSource,
+      organizationId,
+      approverEmployeeId,
+      'approvals.timesheet:act',
+    );
+
+    const authContext = {
+      employeeId: approverEmployeeId,
+      organizationId,
+      tenantDataSource: dataSource,
+    };
+    const canActPermission = await this.authorizationService.hasPermission(
+      authContext,
+      'approvals.timesheet:act',
+    );
+
+    if (query.employeeId) {
+      if (visibleIds && !visibleIds.includes(query.employeeId)) {
+        throw new ForbiddenException('You cannot view this employee\'s timesheets');
+      }
+    }
+
+    const employeeQb = dataSource
+      .getRepository(Employee)
+      .createQueryBuilder('e')
+      .where('e.organizationId = :organizationId', { organizationId });
+
+    if (visibleIds) {
+      employeeQb.andWhere('e.id IN (:...visibleIds)', { visibleIds });
+    }
+    if (query.employeeId) {
+      employeeQb.andWhere('e.id = :employeeId', { employeeId: query.employeeId });
+    }
+
+    const employees = await employeeQb.orderBy('e.name', 'ASC').getMany();
+
+    const dayQb = dataSource
+      .getRepository(TimesheetDay)
+      .createQueryBuilder('d')
+      .leftJoinAndSelect('d.entries', 'entries')
+      .where('d.organizationId = :organizationId', { organizationId })
+      .andWhere('d.workDate BETWEEN :from AND :to', {
+        from: query.from,
+        to: query.to,
+      });
+
+    if (visibleIds) {
+      dayQb.andWhere('d.employeeId IN (:...visibleIds)', { visibleIds });
+    }
+    if (query.employeeId) {
+      dayQb.andWhere('d.employeeId = :employeeId', { employeeId: query.employeeId });
+    }
+
+    const existingDays = await dayQb.getMany();
+    const dayByKey = new Map<string, TimesheetDay>();
+    for (const day of existingDays) {
+      dayByKey.set(`${day.employeeId}:${day.workDate}`, day);
+    }
+
+    const today = formatDateKey(new Date());
+    const pendingThrough = minDateKey(query.to, today);
+    const allDates = enumerateDates(query.from, query.to);
+
+    type TeamDayRow = {
+      id: string | null;
       workDate: string;
-      dayStatus: string;
-      editable: boolean;
-      canReopen: boolean;
-      entry: ReturnType<typeof this.mapEntryToApi>;
-    }[] = [];
+      status: string;
+      totalHours: number;
+      entryCount: number;
+      employeeId: string;
+      employeeName: string;
+      employeeCode?: string;
+      submittedAt: string | null;
+      approvedAt: string | null;
+      canAct: boolean;
+      isPlaceholder: boolean;
+    };
 
-    for (const day of days) {
-      const sorted = (day.entries ?? []).slice().sort((a, b) => a.sortOrder - b.sortOrder);
-      for (const entry of sorted) {
-        rows.push({
+    const allRows: TeamDayRow[] = [];
+
+    for (const employee of employees) {
+      for (const workDate of allDates) {
+        const key = `${employee.id}:${workDate}`;
+        const day = dayByKey.get(key);
+        const isFuture = workDate > today;
+
+        if (!day) {
+          if (isFuture) continue;
+          if (workDate > pendingThrough) continue;
+          allRows.push({
+            id: null,
+            workDate,
+            status: 'PENDING',
+            totalHours: 0,
+            entryCount: 0,
+            employeeId: employee.id,
+            employeeName: employee.name,
+            employeeCode: employee.employeeCode,
+            submittedAt: null,
+            approvedAt: null,
+            canAct: false,
+            isPlaceholder: true,
+          });
+          continue;
+        }
+
+        const hours = Number(day.totalHours);
+        const displayStatus =
+          day.status === TimesheetDayStatus.DRAFT ? 'PENDING' : day.status;
+
+        allRows.push({
+          id: day.id,
           workDate: day.workDate,
-          dayStatus: day.status,
-          editable: TIMESHEET_EDITABLE_STATUSES.includes(day.status),
-          canReopen: day.status === TimesheetDayStatus.SUBMITTED,
-          entry: this.mapEntryToApi(entry),
+          status: displayStatus,
+          totalHours: hours,
+          entryCount: day.entries?.length ?? 0,
+          employeeId: day.employeeId,
+          employeeName: employee.name,
+          employeeCode: employee.employeeCode,
+          submittedAt: day.submittedAt?.toISOString() ?? null,
+          approvedAt: day.approvedAt?.toISOString() ?? null,
+          canAct:
+            canActPermission &&
+            day.status === TimesheetDayStatus.SUBMITTED &&
+            (!actVisibleIds || actVisibleIds.includes(day.employeeId)),
+          isPlaceholder: false,
         });
       }
     }
 
+    allRows.sort((a, b) => {
+      const dateCmp = b.workDate.localeCompare(a.workDate);
+      if (dateCmp !== 0) return dateCmp;
+      return a.employeeName.localeCompare(b.employeeName);
+    });
+
+    const statusSummary: Record<string, number> = {
+      PENDING: 0,
+      SUBMITTED: 0,
+      APPROVED: 0,
+      REJECTED: 0,
+    };
+    let totalHours = 0;
+    let pendingCount = 0;
+    let submittedCount = 0;
+
+    for (const row of allRows) {
+      statusSummary[row.status] = (statusSummary[row.status] ?? 0) + 1;
+      totalHours += row.totalHours;
+      if (row.status === 'PENDING') pendingCount += 1;
+      if (row.status === 'SUBMITTED') submittedCount += 1;
+    }
+
+    const dayRows = query.status
+      ? allRows.filter((row) => row.status === query.status)
+      : allRows;
+
+    const employeeList = employees.map((e) => ({
+      id: e.id,
+      name: e.name,
+      employeeCode: e.employeeCode,
+    }));
+
     return {
       from: query.from,
       to: query.to,
-      totalEntries: rows.length,
-      totalHours: rows.reduce((acc, r) => acc + r.entry.hoursSpent, 0),
-      rows,
+      totalDays: dayRows.length,
+      totalHours,
+      pendingCount,
+      submittedCount,
+      statusSummary,
+      employees: employeeList,
+      days: dayRows,
     };
   }
 
@@ -546,6 +759,108 @@ export class EssTimesheetService {
       employeeName: day.employee?.name,
       submittedAt: day.submittedAt?.toISOString() ?? null,
     }));
+  }
+
+  async approveTimesheetDaysBulk(
+    dataSource: DataSource,
+    organizationId: string,
+    approverEmployeeId: string,
+    dto: BulkApproveTimesheetDto,
+  ) {
+    const authContext = {
+      employeeId: approverEmployeeId,
+      organizationId,
+      tenantDataSource: dataSource,
+    };
+    const canAct = await this.authorizationService.hasPermission(
+      authContext,
+      'approvals.timesheet:act',
+    );
+    if (!canAct) {
+      throw new ForbiddenException('You cannot approve timesheets');
+    }
+
+    let dayIds: string[] = [];
+
+    if (dto.ids?.length) {
+      dayIds = dto.ids;
+    } else if (dto.from && dto.to) {
+      if (dto.from > dto.to) {
+        throw new BadRequestException('"from" must be on or before "to".');
+      }
+
+      const actVisibleIds = await this.getVisibleEmployeeIdsForApprover(
+        dataSource,
+        organizationId,
+        approverEmployeeId,
+        'approvals.timesheet:act',
+      );
+
+      const qb = dataSource
+        .getRepository(TimesheetDay)
+        .createQueryBuilder('d')
+        .select('d.id', 'id')
+        .where('d.organizationId = :organizationId', { organizationId })
+        .andWhere('d.status = :status', { status: TimesheetDayStatus.SUBMITTED })
+        .andWhere('d.workDate BETWEEN :from AND :to', {
+          from: dto.from,
+          to: dto.to,
+        });
+
+      if (actVisibleIds) {
+        qb.andWhere('d.employeeId IN (:...actVisibleIds)', { actVisibleIds });
+      }
+
+      if (dto.employeeId) {
+        if (actVisibleIds && !actVisibleIds.includes(dto.employeeId)) {
+          throw new ForbiddenException('You cannot approve timesheets for this employee');
+        }
+        qb.andWhere('d.employeeId = :employeeId', { employeeId: dto.employeeId });
+      }
+
+      const rows = await qb.getRawMany<{ id: string }>();
+      dayIds = rows.map((r) => r.id);
+    } else {
+      throw new BadRequestException('Provide ids or a from/to date range.');
+    }
+
+    if (dayIds.length === 0) {
+      return { approvedCount: 0, skippedCount: 0, failures: [] as { id: string; message: string }[] };
+    }
+
+    const repo = dataSource.getRepository(TimesheetDay);
+    let approvedCount = 0;
+    let skippedCount = 0;
+    const failures: { id: string; message: string }[] = [];
+
+    for (const dayId of dayIds) {
+      try {
+        const day = await this.getApprovableDay(
+          dataSource,
+          organizationId,
+          approverEmployeeId,
+          dayId,
+        );
+        day.status = TimesheetDayStatus.APPROVED;
+        day.approvedAt = new Date();
+        day.approverEmployeeId = approverEmployeeId;
+        day.rejectedAt = null;
+        day.rejectionReason = null;
+        await repo.save(day);
+        approvedCount += 1;
+      } catch (e) {
+        const message =
+          e instanceof NotFoundException || e instanceof ForbiddenException
+            ? e.message
+            : 'Failed to approve';
+        if (e instanceof NotFoundException) {
+          skippedCount += 1;
+        }
+        failures.push({ id: dayId, message });
+      }
+    }
+
+    return { approvedCount, skippedCount, failures };
   }
 
   async approveTimesheetDay(

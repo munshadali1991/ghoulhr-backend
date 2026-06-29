@@ -16,6 +16,8 @@ import { EmployeesModule } from './employees/employees.module';
 import { SettingsModule } from './settings/settings.module';
 import { EssModule } from './ess/ess.module';
 import { RbacModule } from './rbac/rbac.module';
+import { StorageModule } from './storage/storage.module';
+import { HrDashboardModule } from './hr-dashboard/hr-dashboard.module';
 
 @Module({
   imports: [
@@ -36,6 +38,8 @@ import { RbacModule } from './rbac/rbac.module';
     SettingsModule,
     EssModule,
     RbacModule,
+    StorageModule,
+    HrDashboardModule,
   ],
   controllers: [AppController],
   providers: [AppService],

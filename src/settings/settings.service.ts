@@ -27,6 +27,7 @@ import { LeaveConfiguration } from './entities/leave-configuration.entity';
 import { UpdateLeaveConfigurationsDto } from './dto/leave-configuration.dto';
 import { UpdateTimesheetSettingsDto } from './dto/timesheet-settings.dto';
 import { DEFAULT_TIMESHEET_SETTINGS } from './timesheet-settings.defaults';
+import { StorageService } from '../storage/storage.service';
 
 /** Serialize entity timestamps for JSON responses. */
 function toIsoTimestamp(value: Date | string | null | undefined): string | undefined {
@@ -52,6 +53,8 @@ function readRowTimestamp(
 @Injectable()
 export class SettingsService {
   private readonly logger = new Logger(SettingsService.name);
+
+  constructor(private readonly storageService: StorageService) {}
 
   async getSetting(
     key: string,
@@ -93,6 +96,7 @@ export class SettingsService {
   async updateOrgProfile(
     dto: UpdateOrgProfileDto,
     dataSource: DataSource,
+    organizationId?: string,
   ): Promise<Record<string, any>> {
     const updates: Record<string, any> = {};
 
@@ -103,7 +107,14 @@ export class SettingsService {
       currency: SETTING_KEYS.ORG_CURRENCY,
       dateFormat: SETTING_KEYS.ORG_DATE_FORMAT,
       language: SETTING_KEYS.ORG_LANGUAGE,
+      financialYearStartMonth: SETTING_KEYS.ORG_FINANCIAL_YEAR_START_MONTH,
     };
+
+    if (dto.logo !== undefined && organizationId) {
+      const repo = this.getRepository(dataSource);
+      const existing = await repo.findOne({ where: { key: SETTING_KEYS.ORG_LOGO } });
+      await this.deleteLogoAsset(existing?.value, organizationId);
+    }
 
     for (const [field, key] of Object.entries(mapping)) {
       if (dto[field] !== undefined) {
@@ -113,6 +124,34 @@ export class SettingsService {
     }
 
     return updates;
+  }
+
+  private async deleteLogoAsset(
+    logoValue: unknown,
+    organizationId: string,
+  ): Promise<void> {
+    const storageKey = this.extractLogoStorageKey(logoValue);
+    if (
+      storageKey &&
+      this.storageService.isS3StorageKey(storageKey)
+    ) {
+      await this.storageService.deleteStorageKey(storageKey);
+    }
+  }
+
+  extractLogoStorageKey(logoValue: unknown): string | null {
+    if (typeof logoValue === 'string' && logoValue.startsWith('organizations/')) {
+      return logoValue;
+    }
+    if (
+      logoValue &&
+      typeof logoValue === 'object' &&
+      'storageKey' in logoValue &&
+      typeof (logoValue as { storageKey: unknown }).storageKey === 'string'
+    ) {
+      return (logoValue as { storageKey: string }).storageKey;
+    }
+    return null;
   }
 
   async getOrgProfile(dataSource: DataSource): Promise<Record<string, any>> {
@@ -126,6 +165,7 @@ export class SettingsService {
       [SETTING_KEYS.ORG_CURRENCY]: 'currency',
       [SETTING_KEYS.ORG_DATE_FORMAT]: 'dateFormat',
       [SETTING_KEYS.ORG_LANGUAGE]: 'language',
+      [SETTING_KEYS.ORG_FINANCIAL_YEAR_START_MONTH]: 'financialYearStartMonth',
     };
 
     for (const setting of allSettings) {
@@ -135,6 +175,16 @@ export class SettingsService {
     }
 
     return profile;
+  }
+
+  async getOrgBranding(
+    dataSource: DataSource,
+  ): Promise<{ name?: string; logo?: unknown }> {
+    const profile = await this.getOrgProfile(dataSource);
+    return {
+      name: profile.name,
+      logo: profile.logo,
+    };
   }
 
   private getRepository(

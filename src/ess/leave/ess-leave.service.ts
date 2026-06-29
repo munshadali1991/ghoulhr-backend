@@ -38,6 +38,8 @@ import { AuthorizationService } from '../../rbac/authorization.service';
 import { EmployeeScopeService } from '../../rbac/employee-scope.service';
 import { RbacConfigService } from '../../rbac/rbac-config.service';
 import { AccessScope } from '../../rbac/constants/access-scope.enum';
+import { StorageService } from '../../storage/storage.service';
+import { STORAGE_DRIVERS } from '../../storage/storage.constants';
 
 @Injectable()
 export class EssLeaveService {
@@ -54,6 +56,7 @@ export class EssLeaveService {
     private readonly authorizationService: AuthorizationService,
     private readonly employeeScopeService: EmployeeScopeService,
     private readonly rbacConfig: RbacConfigService,
+    private readonly storageService: StorageService,
   ) {}
 
   private async resolveOrgTimezone(
@@ -552,6 +555,29 @@ export class EssLeaveService {
         }),
       );
 
+      if (saved.supportingDocumentId) {
+        const docRepo = em.getRepository(EmployeeDocument);
+        const doc = await docRepo.findOne({
+          where: { id: saved.supportingDocumentId },
+        });
+        if (
+          doc?.storageDriver === STORAGE_DRIVERS.S3 &&
+          doc.storageKey
+        ) {
+          const finalKey = await this.storageService.finalizeLeaveDocument(
+            organizationId,
+            employeeId,
+            saved.id,
+            doc.storageKey,
+            doc.fileName,
+          );
+          if (finalKey !== doc.storageKey) {
+            doc.storageKey = finalKey;
+            await docRepo.save(doc);
+          }
+        }
+      }
+
       await this.saveCcRecipients(em, saved.id, ccEmployeeIds);
 
       this.balanceService.incrementPending(balance, daysCount);
@@ -606,6 +632,29 @@ export class EssLeaveService {
     }
 
     const doc = dto.supportingDocument;
+    if (doc?.storageKey?.trim()) {
+      if (!this.storageService.isS3StorageKey(doc.storageKey)) {
+        throw new BadRequestException('Invalid supporting document storage key');
+      }
+
+      const saved = await em.getRepository(EmployeeDocument).save(
+        em.getRepository(EmployeeDocument).create({
+          employee,
+          documentType: doc.documentType || 'LEAVE_SUPPORTING',
+          fileName: doc.fileName,
+          mimeType: doc.mimeType,
+          sizeBytes: doc.sizeBytes ?? 0,
+          storageDriver: STORAGE_DRIVERS.S3,
+          storageKey: doc.storageKey.trim(),
+          payloadEnc: null,
+          uploadedBy: employeeId,
+          verificationStatus: 'PENDING',
+        }),
+      );
+
+      return saved.id;
+    }
+
     if (!doc?.dataBase64?.trim()) {
       return null;
     }
@@ -1147,22 +1196,24 @@ export class EssLeaveService {
       throw new NotFoundException('Supporting document not found');
     }
 
-    const doc = await dataSource.getRepository(EmployeeDocument).findOne({
-      where: { id: row.supportingDocumentId },
-    });
-    if (!doc?.payloadEnc) {
-      throw new NotFoundException('Supporting document not found');
-    }
+    const download = await this.storageService.getDocumentDownload(
+      dataSource,
+      organizationId,
+      row.supportingDocumentId,
+    );
 
-    const decrypted = this.fieldEncryption.decrypt(doc.payloadEnc);
-    if (!decrypted) {
-      throw new NotFoundException('Supporting document could not be read');
+    if (download.mode === 'signedUrl') {
+      return {
+        fileName: download.fileName,
+        mimeType: download.mimeType,
+        downloadUrl: download.url,
+      };
     }
 
     return {
-      fileName: doc.fileName,
-      mimeType: doc.mimeType,
-      dataBase64: decrypted,
+      fileName: download.fileName,
+      mimeType: download.mimeType,
+      dataBase64: download.dataBase64,
     };
   }
 

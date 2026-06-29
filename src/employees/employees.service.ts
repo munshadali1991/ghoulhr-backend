@@ -4,7 +4,7 @@ import {
   Logger,
   BadRequestException,
 } from '@nestjs/common';
-import { DataSource, QueryFailedError, Repository } from 'typeorm';
+import { DataSource, QueryFailedError, Repository, In } from 'typeorm';
 import { Employee, EmployeeRole, EmployeeStatus } from './employee.entity';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import {
@@ -30,6 +30,9 @@ import {
   employeeRoleToRoleCode,
   portalRoleLabelToRoleCode,
 } from '../rbac/constants/permission-catalog.constant';
+import { StorageService } from '../storage/storage.service';
+import { STORAGE_DRIVERS } from '../storage/storage.constants';
+import { OnboardingDocumentDto } from './dto/employee-onboarding.dto';
 
 export interface CreateEmployeeResult {
   employee: Employee;
@@ -48,6 +51,7 @@ export class EmployeesService {
     private readonly settingsService: SettingsService,
     private readonly fieldEncryption: FieldEncryptionService,
     private readonly rbacSeedService: RbacSeedService,
+    private readonly storageService: StorageService,
   ) {}
 
   /**
@@ -173,7 +177,7 @@ export class EmployeesService {
       .map((e) => e.toLowerCase().trim());
     let emailTaken = false;
     if (emails.length) {
-      const count = await repo
+      const qb = repo
         .createQueryBuilder('e')
         .where('LOWER(e.email) IN (:...emails)', { emails })
         .orWhere("LOWER(COALESCE(e.personalEmail, '')) IN (:...emails)", {
@@ -181,17 +185,22 @@ export class EmployeesService {
         })
         .orWhere("LOWER(COALESCE(e.officialEmail, '')) IN (:...emails)", {
           emails,
-        })
-        .getCount();
-      emailTaken = count > 0;
+        });
+      if (dto.excludeEmployeeId) {
+        qb.andWhere('e.id != :excludeId', { excludeId: dto.excludeEmployeeId });
+      }
+      emailTaken = (await qb.getCount()) > 0;
     }
     let mobileTaken = false;
     const mobileNorm = dto.mobileNumber?.replace(/\D/g, '') ?? '';
     if (mobileNorm.length >= 8) {
-      const rows = await repo
+      const qb = repo
         .createQueryBuilder('e')
-        .select(['e.phoneNumber', 'e.alternateMobile'])
-        .getMany();
+        .select(['e.id', 'e.phoneNumber', 'e.alternateMobile']);
+      if (dto.excludeEmployeeId) {
+        qb.where('e.id != :excludeId', { excludeId: dto.excludeEmployeeId });
+      }
+      const rows = await qb.getMany();
       mobileTaken = rows.some((r) => {
         const p = (r.phoneNumber || '').replace(/\D/g, '');
         const a = (r.alternateMobile || '').replace(/\D/g, '');
@@ -437,28 +446,27 @@ export class EmployeesService {
 
         if (documents?.length) {
           const docRepo = em.getRepository(EmployeeDocument);
-          for (const d of documents.slice(0, 20)) {
-            if (!d.dataBase64) continue;
-            const approxBytes = Math.floor((d.dataBase64.length * 3) / 4);
-            if (approxBytes > 5 * 1024 * 1024) {
-              throw new BadRequestException(
-                `Document ${d.fileName} exceeds size limit`,
-              );
-            }
-            await docRepo.save(
-              docRepo.create({
-                employee: saved,
-                documentType: d.documentType,
-                fileName: d.fileName,
-                mimeType: d.mimeType,
-                sizeBytes: d.sizeBytes,
-                storageDriver: 'inline_base64',
-                payloadEnc: this.fieldEncryption.encrypt(d.dataBase64),
-                uploadedBy: actorUuid,
-                verificationStatus: 'PENDING',
-              }),
-            );
-          }
+          await this.persistOnboardingDocuments(
+            docRepo,
+            saved,
+            documents,
+            actorUuid,
+            organizationId,
+          );
+        }
+
+        if (basic.profilePhotoStorageKey && organizationId) {
+          const finalPhotoKey = await this.storageService.finalizeProfilePhoto(
+            organizationId,
+            saved.id,
+            basic.profilePhotoStorageKey,
+            basic.profilePhotoFileName || 'profile-photo.jpg',
+          );
+          await empRepo.update(saved.id, {
+            profilePhotoStorageKey: finalPhotoKey,
+            profilePhotoUrl: null,
+          });
+          saved.profilePhotoStorageKey = finalPhotoKey;
         }
 
         await em.getRepository(EmployeeAccessControl).save(
@@ -553,6 +561,8 @@ export class EmployeesService {
       bank,
       compliance,
       emergencyContact,
+      documents,
+      deletedDocumentIds,
       access,
     } = dto;
 
@@ -731,6 +741,61 @@ export class EmployeesService {
         );
       }
 
+      const docRepo = em.getRepository(EmployeeDocument);
+      const deleteIds = (deletedDocumentIds || []).filter(Boolean);
+      if (deleteIds.length) {
+        const docsToRemove = await docRepo.find({
+          where: { id: In(deleteIds), employee: { id: savedEmployee.id } },
+        });
+        for (const doc of docsToRemove) {
+          if (
+            doc.storageDriver === STORAGE_DRIVERS.S3 &&
+            doc.storageKey
+          ) {
+            await this.storageService.deleteStorageKey(doc.storageKey);
+          }
+        }
+        await docRepo
+          .createQueryBuilder()
+          .delete()
+          .from(EmployeeDocument)
+          .where('id IN (:...deleteIds)', { deleteIds })
+          .andWhere('"employeeId" = :employeeId', { employeeId: savedEmployee.id })
+          .execute();
+      }
+
+      const existingDocCount = await docRepo.count({
+        where: { employee: { id: savedEmployee.id } },
+      });
+      const newDocs = (documents || []).filter(
+        (d) => d.storageKey?.trim() || d.dataBase64?.trim(),
+      );
+      if (existingDocCount + newDocs.length > 20) {
+        throw new BadRequestException(
+          'Maximum 20 documents per employee. Remove some documents before adding more.',
+        );
+      }
+      await this.persistOnboardingDocuments(
+        docRepo,
+        savedEmployee,
+        newDocs,
+        actorUuid,
+        organizationId ?? savedEmployee.organizationId,
+      );
+
+      if (basic.profilePhotoStorageKey && (organizationId ?? savedEmployee.organizationId)) {
+        const orgId = organizationId ?? savedEmployee.organizationId!;
+        const finalPhotoKey = await this.storageService.finalizeProfilePhoto(
+          orgId,
+          savedEmployee.id,
+          basic.profilePhotoStorageKey,
+          basic.profilePhotoFileName || 'profile-photo.jpg',
+        );
+        savedEmployee.profilePhotoStorageKey = finalPhotoKey;
+        savedEmployee.profilePhotoUrl = null;
+        await empRepo.save(savedEmployee);
+      }
+
       await em.getRepository(EmployeeAuditLog).save(
         em.getRepository(EmployeeAuditLog).create({
           employee: savedEmployee,
@@ -742,6 +807,134 @@ export class EmployeesService {
 
       return savedEmployee;
     });
+  }
+
+  /** Strip encrypted payloads before API responses. */
+  async serializeEmployeeForResponse(
+    employee: Employee,
+  ): Promise<Record<string, unknown>> {
+    const plain = { ...employee } as Record<string, unknown>;
+    const docs = employee.documents as EmployeeDocument[] | undefined;
+    plain.documents =
+      docs?.map((d) => ({
+        id: d.id,
+        documentType: d.documentType,
+        fileName: d.fileName,
+        mimeType: d.mimeType,
+        sizeBytes: d.sizeBytes,
+        verificationStatus: d.verificationStatus,
+        storageDriver: d.storageDriver,
+        hasFile: Boolean(d.storageKey || d.payloadEnc),
+        createdAt: d.createdAt,
+      })) ?? [];
+
+    const previewUrl = await this.resolveProfilePhotoPreview(
+      employee.organizationId,
+      employee.profilePhotoStorageKey,
+      employee.profilePhotoUrl,
+    );
+    if (previewUrl) {
+      plain.profilePhotoPreviewUrl = previewUrl;
+    }
+
+    return plain;
+  }
+
+  async resolveProfilePhotoPreview(
+    organizationId: string | undefined,
+    profilePhotoStorageKey: string | null | undefined,
+    profilePhotoUrl: string | null | undefined,
+  ): Promise<string | null> {
+    if (profilePhotoStorageKey?.trim() && organizationId) {
+      try {
+        return await this.storageService.getAssetPreviewUrl(
+          organizationId,
+          profilePhotoStorageKey.trim(),
+          'image/jpeg',
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Profile photo preview failed: ${(err as Error).message}`,
+        );
+        return null;
+      }
+    }
+    const legacy = profilePhotoUrl?.trim();
+    if (
+      legacy &&
+      (legacy.startsWith('http://') ||
+        legacy.startsWith('https://') ||
+        legacy.startsWith('data:'))
+    ) {
+      return legacy;
+    }
+    return null;
+  }
+
+  private async persistOnboardingDocuments(
+    docRepo: Repository<EmployeeDocument>,
+    employee: Employee,
+    documents: OnboardingDocumentDto[],
+    actorUuid: string,
+    organizationId?: string,
+  ): Promise<void> {
+    for (const d of documents.slice(0, 20)) {
+      if (d.storageKey?.trim()) {
+        if (!organizationId) {
+          throw new BadRequestException(
+            'Organization context is required for document upload',
+          );
+        }
+        let finalKey = d.storageKey.trim();
+        if (this.storageService.isStagingKey(finalKey)) {
+          finalKey = await this.storageService.finalizeOnboardingDocument(
+            organizationId,
+            employee.id,
+            finalKey,
+            d.documentType,
+            d.fileName,
+          );
+        }
+        await docRepo.save(
+          docRepo.create({
+            employee,
+            documentType: d.documentType,
+            fileName: d.fileName,
+            mimeType: d.mimeType,
+            sizeBytes: d.sizeBytes,
+            storageDriver: STORAGE_DRIVERS.S3,
+            storageKey: finalKey,
+            payloadEnc: null,
+            uploadedBy: actorUuid,
+            verificationStatus: 'PENDING',
+          }),
+        );
+        continue;
+      }
+
+      if (!d.dataBase64?.trim()) continue;
+
+      const approxBytes = Math.floor((d.dataBase64.length * 3) / 4);
+      if (approxBytes > 5 * 1024 * 1024) {
+        throw new BadRequestException(
+          `Document ${d.fileName} exceeds size limit`,
+        );
+      }
+      await docRepo.save(
+        docRepo.create({
+          employee,
+          documentType: d.documentType,
+          fileName: d.fileName,
+          mimeType: d.mimeType,
+          sizeBytes: d.sizeBytes,
+          storageDriver: STORAGE_DRIVERS.INLINE_BASE64,
+          storageKey: null,
+          payloadEnc: this.fieldEncryption.encrypt(d.dataBase64),
+          uploadedBy: actorUuid,
+          verificationStatus: 'PENDING',
+        }),
+      );
+    }
   }
 
   /** JWT `sub` and several satellite columns are PostgreSQL uuid — reject bad values before INSERT. */
@@ -980,6 +1173,7 @@ export class EmployeesService {
         'bankDetail',
         'accessControl',
         'emergencyContactDetail',
+        'documents',
       ],
     });
   }
