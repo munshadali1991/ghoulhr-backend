@@ -22,7 +22,8 @@
     "pm2:sync:orgs": "node ./scripts/pm2-sync-organizations.cjs",
     "pm2:save": "pm2 save",
     "tenant:migrate": "node scripts/run-tenant-migrations.cjs",
-    "fix:org-admin-login": "node scripts/fix-org-admin-login.cjs"
+    "fix:org-admin-login": "node scripts/fix-org-admin-login.cjs",
+    "test:email": "node ./scripts/send-test-email.cjs"
   },
   "engines": {
     "npm": ">=10.0.0",

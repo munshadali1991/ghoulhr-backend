@@ -20,6 +20,7 @@ import { AuthTokenPayload } from './auth.types';
 import { BootstrapSuperAdminDto } from './dto/bootstrap-super-admin.dto';
 import { RefreshSessionService } from './refresh-session.service';
 import { OrganizationSubscriptionService } from '../subscriptions/organization-subscription.service';
+import { AuthActorService } from './auth-actor.service';
 
 interface TenantAwareRequest extends Request {
   organization?: { id: string };
@@ -36,6 +37,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly refreshSessionService: RefreshSessionService,
     private readonly subscriptionService: OrganizationSubscriptionService,
+    private readonly authActorService: AuthActorService,
   ) {}
 
   async register(
@@ -233,16 +235,11 @@ export class AuthService {
     }
 
     const absoluteExpiresAt = this.computeAbsoluteExpiresAt();
-    const accessToken = this.mintAccessToken(
-      {
-        sub: userId,
-        organizationId,
-        organizationSubdomain: organization.subdomain,
-        email,
-        role,
-      },
-      absoluteExpiresAt,
+    const tokenPayload = await this.authActorService.buildMasterAccessTokenPayload(
+      { id: userId, email, role, organizationId },
+      organization,
     );
+    const accessToken = this.mintAccessToken(tokenPayload, absoluteExpiresAt);
 
     const refreshExpires = this.capExpiryDate(
       this.getRefreshExpiryDate(),
@@ -261,11 +258,18 @@ export class AuthService {
       refreshSessionId,
       absoluteExpiresAt,
       user: {
-        id: userId,
+        id: tokenPayload.sub,
         organizationId,
         organizationSubdomain: organization.subdomain,
         email,
         role,
+        ...(tokenPayload.employeeCode
+          ? { employeeCode: tokenPayload.employeeCode }
+          : {}),
+        ...(tokenPayload.name ? { name: tokenPayload.name } : {}),
+        ...(tokenPayload.mustChangePassword
+          ? { mustChangePassword: true }
+          : {}),
       },
     };
   }

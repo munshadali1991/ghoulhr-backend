@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AuthTokenPayload } from './auth.types';
+import { AuthActorService } from './auth-actor.service';
 import { AuthorizationService } from '../rbac/authorization.service';
 import { OrganizationEntitlementService } from '../rbac/organization-entitlement.service';
 import { OrganizationsService } from '../organizations/organizations.service';
@@ -17,6 +18,7 @@ export class AuthSessionService {
     private readonly organizationsService: OrganizationsService,
     private readonly tenantConnectionManager: TenantConnectionManager,
     private readonly employeesService: EmployeesService,
+    private readonly authActorService: AuthActorService,
   ) {}
 
   async buildSessionResponse(payload: AuthTokenPayload) {
@@ -40,21 +42,11 @@ export class AuthSessionService {
       const tenantDataSource =
         await this.tenantConnectionManager.getOrCreateConnection(org);
 
-      let employeeId: string | undefined = payload.employeeCode
-        ? payload.sub
-        : undefined;
-
-      let employeeRecord = employeeId
-        ? await this.employeesService.findById(employeeId, tenantDataSource)
-        : null;
-
-      if (!employeeId && payload.email) {
-        employeeRecord = await this.employeesService.findByEmail(
-          payload.email,
-          tenantDataSource,
-        );
-        employeeId = employeeRecord?.id;
-      }
+      const employeeRecord = await this.authActorService.resolveTenantEmployee(
+        payload,
+        tenantDataSource,
+      );
+      const employeeId = employeeRecord?.id;
 
       if (employeeId && employeeRecord) {
         const profilePhotoUrl = await this.employeesService.resolveProfilePhotoPreview(

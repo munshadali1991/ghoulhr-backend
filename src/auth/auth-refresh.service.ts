@@ -16,6 +16,7 @@ import { EmployeeStatus } from '../employees/employee.entity';
 import { RefreshSession } from './entities/refresh-session.entity';
 import { OrganizationSubscriptionService } from '../subscriptions/organization-subscription.service';
 import { Role } from '../roles/roles.enum';
+import { AuthActorService } from './auth-actor.service';
 
 @Injectable()
 export class AuthRefreshService {
@@ -28,6 +29,7 @@ export class AuthRefreshService {
     private readonly employeesService: EmployeesService,
     private readonly tenantConnectionManager: TenantConnectionManager,
     private readonly subscriptionService: OrganizationSubscriptionService,
+    private readonly authActorService: AuthActorService,
   ) {}
 
   private getRefreshExpiryDate(session: RefreshSession): Date {
@@ -113,14 +115,17 @@ export class AuthRefreshService {
       if (user.role === Role.ORG_ADMIN) {
         await this.assertValidSubscriptionOrRevoke(session, organization.id);
       }
-      return this.authService.mintAccessToken(
+      const tokenPayload = await this.authActorService.buildMasterAccessTokenPayload(
         {
-          sub: user.id,
-          organizationId: user.organizationId,
-          organizationSubdomain: organization.subdomain,
+          id: user.id,
           email: user.email,
           role: user.role,
+          organizationId: user.organizationId,
         },
+        organization,
+      );
+      return this.authService.mintAccessToken(
+        tokenPayload,
         session.absoluteExpiresAt,
       );
     }
