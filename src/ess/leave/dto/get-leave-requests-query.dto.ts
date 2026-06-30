@@ -12,6 +12,8 @@ const LISTABLE_STATUSES = [
 
   LeaveRequestStatus.APPROVED,
 
+  LeaveRequestStatus.REJECTED,
+
 ] as const;
 
 

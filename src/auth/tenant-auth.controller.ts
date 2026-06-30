@@ -1,5 +1,5 @@
-import { Body, Controller, Post, Req, Res, UseGuards } from '@nestjs/common';
-import type { Response } from 'express';
+import { Body, Controller, Post, Req, Res, UnauthorizedException, UseGuards } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import {
   ApiTags,
   ApiOperation,
@@ -11,6 +11,7 @@ import { TenantAuthService } from './tenant-auth.service';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from '../employees/dto/create-employee.dto';
 import { TenantAuthGuard } from './guards/tenant-auth.guard';
+import { SubscriptionGuard } from '../subscriptions/guards/subscription.guard';
 import type { TenantRequest } from '../common/middleware/tenant-resolver.middleware';
 import { AuthCookieService } from './auth-cookie.service';
 import { AuthHandoffService } from './auth-handoff.service';
@@ -44,6 +45,7 @@ export class TenantAuthController {
       res,
       result.accessToken,
       result.refreshPlain,
+      result.absoluteExpiresAt,
     );
 
     const response: {
@@ -75,7 +77,7 @@ export class TenantAuthController {
   }
 
   @Post('change-password')
-  @UseGuards(TenantAuthGuard)
+  @UseGuards(TenantAuthGuard, SubscriptionGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Change employee password' })
   @ApiBody({ type: ChangePasswordDto })
@@ -86,13 +88,40 @@ export class TenantAuthController {
   })
   @ApiResponse({ status: 401, description: 'Current password incorrect' })
   async changePassword(
-    @Req() req: TenantRequest,
+    @Req() req: TenantRequest & Request,
     @Body() dto: ChangePasswordDto,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.tenantAuthService.changePassword(
-      req.user?.sub || '',
+    if (!req.organization?.id || !req.tenantDataSource || !req.user) {
+      throw new UnauthorizedException('Not authenticated');
+    }
+
+    const result = await this.tenantAuthService.changePassword(
+      req.user.sub,
       dto,
       req.tenantDataSource,
+      {
+        id: req.organization.id,
+        name: req.organization.name,
+        subdomain: req.organization.subdomain,
+      },
+      req.user,
     );
+
+    const refreshPlain = req.cookies?.[this.authCookieService.getRefreshCookieName()];
+    if (refreshPlain) {
+      this.authCookieService.attachAuthCookies(
+        res,
+        result.accessToken,
+        refreshPlain,
+        result.absoluteExpiresAt,
+      );
+    }
+
+    return {
+      message: result.message,
+      mustChangePassword: result.mustChangePassword,
+      user: result.user,
+    };
   }
 }

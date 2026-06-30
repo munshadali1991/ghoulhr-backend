@@ -26,6 +26,7 @@ import {
   SUPPORTED_TIMEZONES,
   SUPPORTED_DATE_FORMATS,
   SUPPORTED_LANGUAGES,
+  SUPPORTED_FY_START_MONTHS,
   ALLOWED_EMPLOYEE_FIELDS,
   VALID_WEEKDAYS,
   VALID_TRACKING_MODES,
@@ -77,6 +78,16 @@ export class UpdateOrgProfileDto {
   @IsString()
   @IsIn(SUPPORTED_LANGUAGES as readonly string[])
   language?: string;
+
+  @ApiProperty({
+    example: '4',
+    description: 'Financial year start month (1=January … 12=December)',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(SUPPORTED_FY_START_MONTHS as readonly string[])
+  financialYearStartMonth?: string;
 }
 
 export class UpdateEmployeeSettingsDto {
@@ -150,6 +161,35 @@ export class UpdateEmployeeSettingsDto {
   @ValidateNested({ each: true })
   @Type(() => EmployeeDesignationDto)
   designations?: EmployeeDesignationDto[];
+}
+
+export class UpdateDepartmentsDto {
+  @ApiProperty({
+    description: 'Department master data',
+    example: [{ id: 'uuid', name: 'Engineering', code: 'ENG', isActive: true }],
+  })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => EmployeeDepartmentDto)
+  departments: EmployeeDepartmentDto[];
+}
+
+export class UpdateDesignationsDto {
+  @ApiProperty({
+    description: 'Designation master data',
+    example: [
+      {
+        id: 'uuid',
+        name: 'Software Engineer',
+        departmentIds: ['uuid'],
+        isActive: true,
+      },
+    ],
+  })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => EmployeeDesignationDto)
+  designations: EmployeeDesignationDto[];
 }
 
 export class EmployeeDepartmentDto {

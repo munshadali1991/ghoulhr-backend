@@ -56,7 +56,7 @@ export class OrganizationsController {
   @ApiResponse({ status: 200, type: Organization, isArray: true })
   @ApiResponse({ status: 401, description: 'Missing or invalid bearer token' })
   @ApiResponse({ status: 403, description: 'Role forbidden' })
-  findAll() {
+  async findAll() {
     return this.organizationsService.findAll();
   }
 

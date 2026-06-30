@@ -75,7 +75,11 @@ export class AuthHandoffService {
   async consume(
     code: string,
     requestHost: string | undefined,
-  ): Promise<{ accessToken: string; refreshPlain: string }> {
+  ): Promise<{
+    accessToken: string;
+    refreshPlain: string;
+    absoluteExpiresAt: Date;
+  }> {
     const tokenHash = this.hashCode(code);
     const row = await this.handoffRepo.findOne({ where: { tokenHash } });
     if (!row) {

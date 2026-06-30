@@ -151,6 +151,9 @@ export class Employee extends BaseEntity {
   @Column({ type: 'text', nullable: true })
   profilePhotoUrl?: string;
 
+  @Column({ type: 'varchar', length: 1024, nullable: true })
+  profilePhotoStorageKey?: string | null;
+
   @Column({ nullable: true })
   uanNumber?: string;
 

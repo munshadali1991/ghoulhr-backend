@@ -53,7 +53,14 @@ export class AuthController {
       throw new UnauthorizedException('Not authenticated');
     }
     const payload = this.authService.verifyAccessToken(token);
-    return this.authSessionService.buildSessionResponse(payload);
+    const session = await this.authSessionService.buildSessionResponse(payload);
+    const sessionExpiresAt = payload.sessionExp
+      ? new Date(payload.sessionExp * 1000).toISOString()
+      : undefined;
+    return {
+      ...session,
+      ...(sessionExpiresAt ? { sessionExpiresAt } : {}),
+    };
   }
 
   @Post('refresh')
@@ -86,9 +93,14 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { accessToken, refreshPlain } =
+    const { accessToken, refreshPlain, absoluteExpiresAt } =
       await this.authHandoffService.consume(dto.code, req.headers.host);
-    this.authCookieService.attachAuthCookies(res, accessToken, refreshPlain);
+    this.authCookieService.attachAuthCookies(
+      res,
+      accessToken,
+      refreshPlain,
+      absoluteExpiresAt,
+    );
     return { ok: true };
   }
 
@@ -118,6 +130,7 @@ export class AuthController {
       res,
       result.accessToken,
       result.refreshPlain,
+      result.absoluteExpiresAt,
     );
     return { user: result.user };
   }
@@ -139,6 +152,7 @@ export class AuthController {
       accessToken: string;
       refreshPlain: string;
       refreshSessionId: string;
+      absoluteExpiresAt: Date;
       user: {
         organizationSubdomain?: string;
         role: string;
@@ -165,6 +179,7 @@ export class AuthController {
       res,
       result.accessToken,
       result.refreshPlain,
+      result.absoluteExpiresAt,
     );
 
     const response: {
@@ -219,6 +234,7 @@ export class AuthController {
       res,
       result.accessToken,
       result.refreshPlain,
+      result.absoluteExpiresAt,
     );
     return { user: result.user };
   }

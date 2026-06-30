@@ -44,15 +44,32 @@ export class AuthSessionService {
         ? payload.sub
         : undefined;
 
+      let employeeRecord = employeeId
+        ? await this.employeesService.findById(employeeId, tenantDataSource)
+        : null;
+
       if (!employeeId && payload.email) {
-        const employee = await this.employeesService.findByEmail(
+        employeeRecord = await this.employeesService.findByEmail(
           payload.email,
           tenantDataSource,
         );
-        employeeId = employee?.id;
+        employeeId = employeeRecord?.id;
       }
 
-      if (employeeId) {
+      if (employeeId && employeeRecord) {
+        const profilePhotoUrl = await this.employeesService.resolveProfilePhotoPreview(
+          payload.organizationId,
+          employeeRecord.profilePhotoStorageKey,
+          employeeRecord.profilePhotoUrl,
+        );
+
+        const enrichedUser = {
+          ...user,
+          mustChangePassword: employeeRecord.mustChangePassword,
+          status: employeeRecord.status,
+          ...(profilePhotoUrl ? { profilePhotoUrl } : {}),
+        };
+
         const auth = await this.authorizationService.resolve({
           employeeId,
           organizationId: payload.organizationId,
@@ -67,7 +84,7 @@ export class AuthSessionService {
               : [];
 
         return {
-          user,
+          user: enrichedUser,
           entitledModules: auth.entitledModules,
           permissions: auth.permissions,
           roles,
@@ -99,6 +116,9 @@ export class AuthSessionService {
       role: payload.role,
       ...(payload.employeeCode ? { employeeCode: payload.employeeCode } : {}),
       ...(payload.name ? { name: payload.name } : {}),
+      ...(payload.mustChangePassword
+        ? { mustChangePassword: true }
+        : { mustChangePassword: false }),
     };
   }
 }

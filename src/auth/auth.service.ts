@@ -19,6 +19,7 @@ import { UserStatus } from '../users/user-status.enum';
 import { AuthTokenPayload } from './auth.types';
 import { BootstrapSuperAdminDto } from './dto/bootstrap-super-admin.dto';
 import { RefreshSessionService } from './refresh-session.service';
+import { OrganizationSubscriptionService } from '../subscriptions/organization-subscription.service';
 
 interface TenantAwareRequest extends Request {
   organization?: { id: string };
@@ -34,6 +35,7 @@ export class AuthService {
     private readonly organizationsService: OrganizationsService,
     private readonly configService: ConfigService,
     private readonly refreshSessionService: RefreshSessionService,
+    private readonly subscriptionService: OrganizationSubscriptionService,
   ) {}
 
   async register(
@@ -72,6 +74,12 @@ export class AuthService {
 
     if (user.status !== UserStatus.ACTIVE) {
       throw new ForbiddenException('User account is inactive');
+    }
+
+    if (user.role === Role.ORG_ADMIN && user.organizationId) {
+      await this.subscriptionService.assertOrganizationHasValidSubscription(
+        user.organizationId,
+      );
     }
 
     return this.buildAuthResponse(
@@ -200,6 +208,13 @@ export class AuthService {
       throw new UnauthorizedException('Token expired');
     }
 
+    if (
+      parsedPayload.sessionExp &&
+      parsedPayload.sessionExp < Math.floor(Date.now() / 1000)
+    ) {
+      throw new UnauthorizedException('Session expired');
+    }
+
     return parsedPayload;
   }
 
@@ -217,25 +232,34 @@ export class AuthService {
       );
     }
 
-    const accessToken = this.mintAccessToken({
-      sub: userId,
-      organizationId,
-      organizationSubdomain: organization.subdomain,
-      email,
-      role,
-    });
+    const absoluteExpiresAt = this.computeAbsoluteExpiresAt();
+    const accessToken = this.mintAccessToken(
+      {
+        sub: userId,
+        organizationId,
+        organizationSubdomain: organization.subdomain,
+        email,
+        role,
+      },
+      absoluteExpiresAt,
+    );
 
-    const refreshExpires = this.getRefreshExpiryDate();
+    const refreshExpires = this.capExpiryDate(
+      this.getRefreshExpiryDate(),
+      absoluteExpiresAt,
+    );
     const { plain: refreshPlain, id: refreshSessionId } =
       await this.refreshSessionService.issueMasterSession(
         userId,
         refreshExpires,
+        absoluteExpiresAt,
       );
 
     return {
       accessToken,
       refreshPlain,
       refreshSessionId,
+      absoluteExpiresAt,
       user: {
         id: userId,
         organizationId,
@@ -248,14 +272,35 @@ export class AuthService {
 
   /** Public: mint a short-lived access token (shared with tenant employee auth). */
   mintAccessToken(
-    payload: Omit<AuthTokenPayload, 'exp'> &
+    payload: Omit<AuthTokenPayload, 'exp' | 'sessionExp'> &
       Partial<Pick<AuthTokenPayload, 'employeeCode' | 'name'>>,
+    absoluteExpiresAt?: Date,
   ): string {
+    const sessionDeadline =
+      absoluteExpiresAt ?? this.computeAbsoluteExpiresAt();
+    const sessionExp = Math.floor(sessionDeadline.getTime() / 1000);
+    const accessExp = this.getAccessTokenExpiryEpoch(sessionDeadline);
     const full: AuthTokenPayload = {
       ...payload,
-      exp: this.getAccessTokenExpiryEpoch(),
+      exp: accessExp,
+      sessionExp,
     };
     return this.generateAccessToken(full);
+  }
+
+  getSessionMaxLifetimeMs(): number {
+    const raw =
+      this.configService.get<string>('AUTH_SESSION_MAX_LIFETIME') ?? '24h';
+    const sec = this.parseTtlToSeconds(raw) ?? 24 * 60 * 60;
+    return sec * 1000;
+  }
+
+  computeAbsoluteExpiresAt(): Date {
+    return new Date(Date.now() + this.getSessionMaxLifetimeMs());
+  }
+
+  capExpiryDate(sliding: Date, absolute: Date): Date {
+    return sliding.getTime() <= absolute.getTime() ? sliding : absolute;
   }
 
   getRefreshTtlMs(): number {
@@ -374,12 +419,17 @@ export class AuthService {
     return createHmac('sha256', secret).update(value).digest('base64url');
   }
 
-  private getAccessTokenExpiryEpoch(): number {
+  private getAccessTokenExpiryEpoch(absoluteCap?: Date): number {
     const jwtTtl =
       this.configService.get<string>('JWT_ACCESS_EXPIRES_IN') ??
       this.configService.get<string>('JWT_EXPIRES_IN');
     const ttlSeconds = this.parseTtlToSeconds(jwtTtl) ?? 15 * 60;
-    return Math.floor(Date.now() / 1000) + ttlSeconds;
+    const slidingExp = Math.floor(Date.now() / 1000) + ttlSeconds;
+    if (!absoluteCap) {
+      return slidingExp;
+    }
+    const absoluteExp = Math.floor(absoluteCap.getTime() / 1000);
+    return Math.min(slidingExp, absoluteExp);
   }
 
   private parseTtlToSeconds(value?: string) {

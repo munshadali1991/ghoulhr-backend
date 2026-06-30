@@ -16,6 +16,8 @@ import {
   UpdateOrgProfileDto,
   UpdateEmployeeSettingsDto,
   UpdateAttendanceSettingsDto,
+  UpdateDepartmentsDto,
+  UpdateDesignationsDto,
 } from './dto/create-setting.dto';
 import { UpdateTimesheetSettingsDto } from './dto/timesheet-settings.dto';
 import { UpdateLocationConfigurationsDto } from './dto/location-configuration.dto';
@@ -26,13 +28,14 @@ import {
 } from './dto/timesheet-category.dto';
 import { TimesheetCategoryService } from './timesheet-category.service';
 import { TenantAuthGuard } from '../auth/guards/tenant-auth.guard';
+import { SubscriptionGuard } from '../subscriptions/guards/subscription.guard';
 import { PermissionsGuard } from '../rbac/guards/permissions.guard';
 import { RequirePermissions, RequireAnyPermission } from '../rbac/decorators/require-permissions.decorator';
 import type { TenantRequest } from '../common/middleware/tenant-resolver.middleware';
 
 @ApiTags('Settings')
 @ApiBearerAuth()
-@UseGuards(TenantAuthGuard, PermissionsGuard)
+@UseGuards(TenantAuthGuard, SubscriptionGuard, PermissionsGuard)
 @Controller('settings')
 export class SettingsController {
   constructor(
@@ -47,6 +50,14 @@ export class SettingsController {
     return this.settingsService.getOrgProfile(req.tenantDataSource);
   }
 
+  @Get('branding')
+  @ApiOperation({
+    summary: 'Organization name and logo for app shell (all authenticated users)',
+  })
+  async getOrgBranding(@Req() req: TenantRequest) {
+    return this.settingsService.getOrgBranding(req.tenantDataSource);
+  }
+
   @Post('profile')
   @RequirePermissions('settings.organization:write')
   @ApiOperation({ summary: 'Update organization profile settings' })
@@ -57,6 +68,7 @@ export class SettingsController {
     const updates = await this.settingsService.updateOrgProfile(
       dto,
       req.tenantDataSource,
+      req.organization?.id,
     );
     return { message: 'Profile updated successfully', updates };
   }
@@ -84,6 +96,56 @@ export class SettingsController {
       req.organization?.id,
     );
     return { message: 'Employee settings updated successfully', updates };
+  }
+
+  @Get('departments')
+  @RequirePermissions('settings.departments:read')
+  @ApiOperation({ summary: 'List departments' })
+  async getDepartments(@Req() req: TenantRequest) {
+    return this.settingsService.getDepartments(
+      req.tenantDataSource,
+      req.organization?.id,
+    );
+  }
+
+  @Post('departments')
+  @RequirePermissions('settings.departments:write')
+  @ApiOperation({ summary: 'Replace department master data' })
+  async updateDepartments(
+    @Req() req: TenantRequest,
+    @Body() dto: UpdateDepartmentsDto,
+  ) {
+    const result = await this.settingsService.updateDepartments(
+      dto,
+      req.tenantDataSource,
+      req.organization?.id,
+    );
+    return { message: 'Departments updated successfully', ...result };
+  }
+
+  @Get('designations')
+  @RequirePermissions('settings.designations:read')
+  @ApiOperation({ summary: 'List designations' })
+  async getDesignations(@Req() req: TenantRequest) {
+    return this.settingsService.getDesignations(
+      req.tenantDataSource,
+      req.organization?.id,
+    );
+  }
+
+  @Post('designations')
+  @RequirePermissions('settings.designations:write')
+  @ApiOperation({ summary: 'Replace designation master data' })
+  async updateDesignations(
+    @Req() req: TenantRequest,
+    @Body() dto: UpdateDesignationsDto,
+  ) {
+    const result = await this.settingsService.updateDesignations(
+      dto,
+      req.tenantDataSource,
+      req.organization?.id,
+    );
+    return { message: 'Designations updated successfully', ...result };
   }
 
   @Get('attendance')
@@ -250,6 +312,8 @@ export class SettingsController {
   @RequireAnyPermission(
     'settings.organization:read',
     'settings.employees:read',
+    'settings.departments:read',
+    'settings.designations:read',
     'settings.attendance:read',
     'settings.timesheet:read',
     'settings.locations:read',
@@ -264,6 +328,8 @@ export class SettingsController {
   @RequireAnyPermission(
     'settings.organization:read',
     'settings.employees:read',
+    'settings.departments:read',
+    'settings.designations:read',
     'settings.attendance:read',
     'settings.timesheet:read',
     'settings.locations:read',
@@ -278,6 +344,8 @@ export class SettingsController {
   @RequireAnyPermission(
     'settings.organization:write',
     'settings.employees:write',
+    'settings.departments:write',
+    'settings.designations:write',
     'settings.attendance:write',
     'settings.timesheet:write',
     'settings.locations:write',

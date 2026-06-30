@@ -5,21 +5,26 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { TenantAuthGuard } from '../../auth/guards/tenant-auth.guard';
+import { SubscriptionGuard } from '../../subscriptions/guards/subscription.guard';
 import { PermissionsGuard } from '../../rbac/guards/permissions.guard';
 import { RequirePermissions } from '../../rbac/decorators/require-permissions.decorator';
 import type { TenantRequest } from '../../common/middleware/tenant-resolver.middleware';
 import { EssLeaveService } from '../leave/ess-leave.service';
 import { EssTimesheetService } from '../timesheet/ess-timesheet.service';
+import { TeamTimesheetQueryDto } from '../timesheet/dto/team-timesheet-query.dto';
+import { BulkApproveTimesheetDto } from './dto/bulk-approve-timesheet.dto';
 import { RejectApprovalDto } from './dto/reject-approval.dto';
+import { ApproveApprovalDto } from './dto/approve-approval.dto';
 
 @ApiTags('ESS Approvals')
 @ApiBearerAuth()
-@UseGuards(TenantAuthGuard, PermissionsGuard)
+@UseGuards(TenantAuthGuard, SubscriptionGuard, PermissionsGuard)
 @Controller('ess/approvals')
 export class EssApprovalsController {
   constructor(
@@ -38,18 +43,50 @@ export class EssApprovalsController {
     );
   }
 
+  @Get('leave/:id')
+  @RequirePermissions('approvals.leave:read')
+  @ApiOperation({ summary: 'Get leave approval detail for manager review' })
+  getLeaveApprovalDetail(
+    @Req() req: TenantRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.essLeaveService.getLeaveApprovalDetail(
+      req.tenantDataSource!,
+      req.organization!.id,
+      req.user!.sub,
+      id,
+    );
+  }
+
+  @Get('leave/:id/document')
+  @RequirePermissions('approvals.leave:read')
+  @ApiOperation({ summary: 'Download supporting document for a leave request' })
+  getLeaveApprovalDocument(
+    @Req() req: TenantRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.essLeaveService.getLeaveApprovalDocument(
+      req.tenantDataSource!,
+      req.organization!.id,
+      req.user!.sub,
+      id,
+    );
+  }
+
   @Post('leave/:id/approve')
   @RequirePermissions('approvals.leave:act')
   @ApiOperation({ summary: 'Approve a pending leave request' })
   approveLeave(
     @Req() req: TenantRequest,
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ApproveApprovalDto,
   ) {
     return this.essLeaveService.approveLeaveRequest(
       req.tenantDataSource!,
       req.organization!.id,
       req.user!.sub,
       id,
+      dto.notes,
     );
   }
 
@@ -78,6 +115,51 @@ export class EssApprovalsController {
       req.tenantDataSource!,
       req.organization!.id,
       req.user!.sub,
+    );
+  }
+
+  @Get('timesheet/team')
+  @RequirePermissions('approvals.timesheet:read')
+  @ApiOperation({ summary: 'List team timesheet days for manager review' })
+  listTeamTimesheets(
+    @Req() req: TenantRequest,
+    @Query() query: TeamTimesheetQueryDto,
+  ) {
+    return this.essTimesheetService.listTeamTimesheetDays(
+      req.tenantDataSource!,
+      req.organization!.id,
+      req.user!.sub,
+      query,
+    );
+  }
+
+  @Post('timesheet/bulk-approve')
+  @RequirePermissions('approvals.timesheet:act')
+  @ApiOperation({ summary: 'Bulk approve submitted timesheet days' })
+  bulkApproveTimesheets(
+    @Req() req: TenantRequest,
+    @Body() dto: BulkApproveTimesheetDto,
+  ) {
+    return this.essTimesheetService.approveTimesheetDaysBulk(
+      req.tenantDataSource!,
+      req.organization!.id,
+      req.user!.sub,
+      dto,
+    );
+  }
+
+  @Get('timesheet/:id')
+  @RequirePermissions('approvals.timesheet:read')
+  @ApiOperation({ summary: 'Get timesheet approval detail for manager review' })
+  getTimesheetApprovalDetail(
+    @Req() req: TenantRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.essTimesheetService.getTimesheetApprovalDetail(
+      req.tenantDataSource!,
+      req.organization!.id,
+      req.user!.sub,
+      id,
     );
   }
 

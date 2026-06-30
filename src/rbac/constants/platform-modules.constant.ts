@@ -8,6 +8,7 @@ export const PLATFORM_MODULES = [
   { code: 'payroll', name: 'Payroll', description: 'Payroll processing' },
   { code: 'tracking', name: 'Tracking', description: 'Employee tracking module' },
   { code: 'approvals', name: 'Approvals', description: 'Leave and timesheet approvals' },
+  { code: 'dashboard', name: 'Dashboards', description: 'Role-based landing dashboards' },
   { code: 'rbac', name: 'Roles & Permissions', description: 'Tenant RBAC administration' },
 ] as const;
 
@@ -37,6 +38,9 @@ export function permissionModuleCode(permissionCode: string): string {
   }
   if (permissionCode.startsWith('payroll')) {
     return 'payroll';
+  }
+  if (permissionCode.startsWith('dashboard.')) {
+    return 'dashboard';
   }
   if (permissionCode.startsWith('rbac')) {
     return 'rbac';

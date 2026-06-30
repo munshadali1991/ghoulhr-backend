@@ -6,9 +6,10 @@ import { AuthModule } from '../auth/auth.module';
 import { PasswordService } from '../common/services/password.service';
 import { FieldEncryptionService } from '../common/services/field-encryption.service';
 import { SettingsModule } from '../settings/settings.module';
+import { EmailModule } from '../modules/email';
 
 @Module({
-  imports: [forwardRef(() => AuthModule), SettingsModule],
+  imports: [forwardRef(() => AuthModule), SettingsModule, EmailModule],
   controllers: [EmployeesController],
   providers: [
     EmployeesService,

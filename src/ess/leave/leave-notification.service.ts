@@ -18,6 +18,14 @@ export interface BroadcastLeaveAppliedParams {
   ccEmployeeIds?: string[];
 }
 
+export interface NotifyApproverOnLeaveAppliedParams {
+  organizationId: string;
+  leaveRequest: LeaveRequest;
+  applicant: Employee;
+  approver: Employee;
+  leaveTypeName: string;
+}
+
 @Injectable()
 export class LeaveNotificationService {
   constructor(private readonly emailService: EmailService) {}
@@ -85,20 +93,95 @@ export class LeaveNotificationService {
         })),
       );
     }
+  }
 
-    await Promise.all(
-      recipients.map((recipient) =>
-        this.emailService.sendLeaveAppliedNotification({
-          to: recipient.email,
-          recipientName: recipient.name,
-          applicantName: applicant.name,
-          leaveType: leaveTypeName,
-          startDate,
-          endDate,
-          body,
-        }),
-      ),
-    );
+  async notifyApproverOnLeaveApplied(
+    em: EntityManager,
+    params: NotifyApproverOnLeaveAppliedParams,
+  ): Promise<void> {
+    const { organizationId, leaveRequest, applicant, approver, leaveTypeName } =
+      params;
+
+    if (!leaveRequest.approverEmployeeId || approver.id !== leaveRequest.approverEmployeeId) {
+      return;
+    }
+
+    if (approver.id === applicant.id) {
+      return;
+    }
+
+    const startDate = formatLeaveDate(leaveRequest.startDate);
+    const endDate = formatLeaveDate(leaveRequest.endDate);
+    const body = `${applicant.name} requested your approval for ${leaveTypeName} (${startDate} – ${endDate})`;
+    const title = 'Leave approval required';
+
+    await em.getRepository(EmployeeNotification).insert({
+      organizationId,
+      recipientEmployeeId: approver.id,
+      leaveRequestId: leaveRequest.id,
+      type: EmployeeNotificationType.LEAVE_PENDING_APPROVAL,
+      title,
+      body,
+    });
+
+    await this.emailService.sendLeaveApplied({
+      to: approver.email,
+      approverName: approver.name,
+      applicantName: applicant.name,
+      leaveType: leaveTypeName,
+      startDate,
+      endDate,
+      reason: leaveRequest.reason ?? undefined,
+    });
+  }
+
+  async notifyApplicantOnDecision(
+    em: EntityManager,
+    params: {
+      organizationId: string;
+      leaveRequest: LeaveRequest;
+      applicant: Employee;
+      leaveTypeName: string;
+      decision: 'APPROVED' | 'REJECTED';
+      notes?: string;
+    },
+  ): Promise<void> {
+    const { organizationId, leaveRequest, applicant, leaveTypeName, decision, notes } =
+      params;
+
+    const startDate = formatLeaveDate(leaveRequest.startDate);
+    const endDate = formatLeaveDate(leaveRequest.endDate);
+    const isApproved = decision === 'APPROVED';
+    const title = isApproved ? 'Leave approved' : 'Leave rejected';
+    const body = isApproved
+      ? `Your ${leaveTypeName} request (${startDate} – ${endDate}) was approved.${
+          notes ? ` Note: ${notes}` : ''
+        }`
+      : `Your ${leaveTypeName} request (${startDate} – ${endDate}) was rejected.${
+          notes ? ` Reason: ${notes}` : ''
+        }`;
+
+    await em.getRepository(EmployeeNotification).insert({
+      organizationId,
+      recipientEmployeeId: applicant.id,
+      leaveRequestId: leaveRequest.id,
+      type: isApproved
+        ? EmployeeNotificationType.LEAVE_APPROVED
+        : EmployeeNotificationType.LEAVE_REJECTED,
+      title,
+      body,
+    });
+
+    if (isApproved) {
+      await this.emailService.sendLeaveApproved({
+        to: applicant.email,
+        recipientName: applicant.name,
+        leaveType: leaveTypeName,
+        startDate,
+        endDate,
+        notes,
+      });
+    }
   }
 }
 

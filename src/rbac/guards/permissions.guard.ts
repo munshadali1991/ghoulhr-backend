@@ -37,6 +37,20 @@ export class PermissionsGuard implements CanActivate {
       return true;
     }
 
+    if (
+      !this.rbacConfig.isSettingsEnforced() &&
+      required.some((p) => p.startsWith('settings.'))
+    ) {
+      return true;
+    }
+
+    if (
+      !this.rbacConfig.isEmployeesEnforced() &&
+      required.some((p) => p.startsWith('employees:'))
+    ) {
+      return true;
+    }
+
     const mode =
       this.reflector.getAllAndOverride<PermissionsMode>(PERMISSIONS_MODE_KEY, [
         context.getHandler(),

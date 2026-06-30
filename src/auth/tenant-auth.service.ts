@@ -16,11 +16,15 @@ import { OrganizationsService } from '../organizations/organizations.service';
 import { TenantConnectionManager } from '../core/database/tenant-connection.manager';
 import { AuthService } from './auth.service';
 import { RefreshSessionService } from './refresh-session.service';
+import { OrganizationSubscriptionService } from '../subscriptions/organization-subscription.service';
+import { EmailService } from '../modules/email';
+import { AuthTokenPayload } from './auth.types';
 
 export interface TenantEmployeeLoginResponse {
   accessToken: string;
   refreshPlain: string;
   refreshSessionId: string;
+  absoluteExpiresAt: Date;
   user: {
     id: string;
     employeeCode: string;
@@ -44,6 +48,8 @@ export class TenantAuthService {
     private readonly tenantConnectionManager: TenantConnectionManager,
     private readonly authService: AuthService,
     private readonly refreshSessionService: RefreshSessionService,
+    private readonly subscriptionService: OrganizationSubscriptionService,
+    private readonly emailService: EmailService,
   ) {}
 
   /**
@@ -268,28 +274,42 @@ export class TenantAuthService {
     // Record successful login
     await this.employeesService.recordLogin(employee.id, targetDataSource);
 
-    const accessToken = this.authService.mintAccessToken({
-      sub: employee.id,
-      organizationId: targetOrganization.id,
-      organizationSubdomain: targetOrganization.subdomain,
-      email: employee.email,
-      role: employee.role,
-      employeeCode: employee.employeeCode,
-      name: employee.name,
-    });
+    await this.subscriptionService.assertOrganizationHasValidSubscription(
+      targetOrganization.id,
+    );
 
-    const refreshExpires = this.authService.getRefreshExpiryDate();
+    const absoluteExpiresAt = this.authService.computeAbsoluteExpiresAt();
+    const accessToken = this.authService.mintAccessToken(
+      {
+        sub: employee.id,
+        organizationId: targetOrganization.id,
+        organizationSubdomain: targetOrganization.subdomain,
+        email: employee.email,
+        role: employee.role,
+        employeeCode: employee.employeeCode,
+        name: employee.name,
+        mustChangePassword: employee.mustChangePassword,
+      },
+      absoluteExpiresAt,
+    );
+
+    const refreshExpires = this.authService.capExpiryDate(
+      this.authService.getRefreshExpiryDate(),
+      absoluteExpiresAt,
+    );
     const { plain: refreshPlain, id: refreshSessionId } =
       await this.refreshSessionService.issueEmployeeSession(
         employee.id,
         targetOrganization.id,
         refreshExpires,
+        absoluteExpiresAt,
       );
 
     const response: TenantEmployeeLoginResponse = {
       accessToken,
       refreshPlain,
       refreshSessionId,
+      absoluteExpiresAt,
       user: {
         id: employee.id,
         employeeCode: employee.employeeCode,
@@ -323,7 +343,15 @@ export class TenantAuthService {
     employeeId: string,
     dto: ChangePasswordDto,
     tenantDataSource: DataSource,
-  ): Promise<{ message: string; mustChangePassword: boolean }> {
+    organization: { id: string; name: string; subdomain: string },
+    tokenPayload: AuthTokenPayload,
+  ): Promise<{
+    message: string;
+    mustChangePassword: boolean;
+    accessToken: string;
+    absoluteExpiresAt: Date;
+    user: TenantEmployeeLoginResponse['user'];
+  }> {
     const employee = await this.employeesService.findById(
       employeeId,
       tenantDataSource,
@@ -333,7 +361,6 @@ export class TenantAuthService {
       throw new UnauthorizedException('Employee not found');
     }
 
-    // Verify current password
     const isCurrentPasswordValid = await this.passwordService.verifyPassword(
       dto.currentPassword,
       employee.password,
@@ -343,7 +370,6 @@ export class TenantAuthService {
       throw new UnauthorizedException('Current password is incorrect');
     }
 
-    // Validate new password strength
     const validation = this.passwordService.validatePasswordStrength(
       dto.newPassword,
     );
@@ -351,11 +377,46 @@ export class TenantAuthService {
       throw new BadRequestException(validation.errors.join(', '));
     }
 
-    // Update password
-    await this.employeesService.updatePassword(
+    const { activated } = await this.employeesService.updatePassword(
       employeeId,
       dto.newPassword,
       tenantDataSource,
+    );
+
+    const updatedEmployee = await this.employeesService.findById(
+      employeeId,
+      tenantDataSource,
+    );
+
+    if (!updatedEmployee) {
+      throw new UnauthorizedException('Employee not found');
+    }
+
+    if (activated) {
+      void this.emailService.sendAccountActivated({
+        to: updatedEmployee.email,
+        employeeName: updatedEmployee.name,
+        organizationName: organization.name,
+        subdomain: organization.subdomain,
+      });
+    }
+
+    const absoluteExpiresAt = tokenPayload.sessionExp
+      ? new Date(tokenPayload.sessionExp * 1000)
+      : this.authService.computeAbsoluteExpiresAt();
+
+    const accessToken = this.authService.mintAccessToken(
+      {
+        sub: updatedEmployee.id,
+        organizationId: organization.id,
+        organizationSubdomain: organization.subdomain,
+        email: updatedEmployee.email,
+        role: updatedEmployee.role,
+        employeeCode: updatedEmployee.employeeCode,
+        name: updatedEmployee.name,
+        mustChangePassword: false,
+      },
+      absoluteExpiresAt,
     );
 
     this.logger.log(`Password changed successfully for employee ${employeeId}`);
@@ -363,6 +424,17 @@ export class TenantAuthService {
     return {
       message: 'Password changed successfully',
       mustChangePassword: false,
+      accessToken,
+      absoluteExpiresAt,
+      user: {
+        id: updatedEmployee.id,
+        employeeCode: updatedEmployee.employeeCode,
+        email: updatedEmployee.email,
+        name: updatedEmployee.name,
+        role: updatedEmployee.role,
+        mustChangePassword: false,
+        organizationSubdomain: organization.subdomain,
+      },
     };
   }
 }

@@ -14,6 +14,8 @@ import { TenantConnectionManager } from '../core/database/tenant-connection.mana
 import { UserStatus } from '../users/user-status.enum';
 import { EmployeeStatus } from '../employees/employee.entity';
 import { RefreshSession } from './entities/refresh-session.entity';
+import { OrganizationSubscriptionService } from '../subscriptions/organization-subscription.service';
+import { Role } from '../roles/roles.enum';
 
 @Injectable()
 export class AuthRefreshService {
@@ -25,11 +27,12 @@ export class AuthRefreshService {
     private readonly organizationsService: OrganizationsService,
     private readonly employeesService: EmployeesService,
     private readonly tenantConnectionManager: TenantConnectionManager,
+    private readonly subscriptionService: OrganizationSubscriptionService,
   ) {}
 
-  private getRefreshExpiryDate(): Date {
-    const ttlMs = this.authService.getRefreshTtlMs();
-    return new Date(Date.now() + ttlMs);
+  private getRefreshExpiryDate(session: RefreshSession): Date {
+    const sliding = new Date(Date.now() + this.authService.getRefreshTtlMs());
+    return this.authService.capExpiryDate(sliding, session.absoluteExpiresAt);
   }
 
   async refresh(req: Request, res: Response): Promise<{ ok: true }> {
@@ -44,27 +47,49 @@ export class AuthRefreshService {
     const session = await this.refreshSessionService.findValidByPlain(plain);
     if (!session) {
       this.authCookieService.clearAuthCookies(res);
-      throw new UnauthorizedException('Invalid refresh session');
+      throw new UnauthorizedException('Session expired');
     }
 
-    const { accessToken, refreshPlain } =
-      await this.mintAndRotateFromSession(session);
-    this.authCookieService.attachAuthCookies(res, accessToken, refreshPlain);
+    const { accessToken, refreshPlain, absoluteExpiresAt } =
+      await this.mintAndRotateFromSession(session, res);
+    this.authCookieService.attachAuthCookies(
+      res,
+      accessToken,
+      refreshPlain,
+      absoluteExpiresAt,
+    );
     return { ok: true };
   }
 
   async mintAndRotateFromSession(
     session: RefreshSession,
-  ): Promise<{ accessToken: string; refreshPlain: string }> {
+    res?: Response,
+  ): Promise<{
+    accessToken: string;
+    refreshPlain: string;
+    absoluteExpiresAt: Date;
+  }> {
     if (session.revokedAt || session.expiresAt.getTime() <= Date.now()) {
       throw new UnauthorizedException('Invalid refresh session');
     }
 
-    const refreshExpires = this.getRefreshExpiryDate();
+    if (session.absoluteExpiresAt.getTime() <= Date.now()) {
+      await this.refreshSessionService.revokeSession(session.id);
+      if (res) {
+        this.authCookieService.clearAuthCookies(res);
+      }
+      throw new UnauthorizedException('Session expired');
+    }
+
+    const refreshExpires = this.getRefreshExpiryDate(session);
     const accessToken = await this.mintAccessFromRefreshSession(session);
     const { plain: refreshPlain } =
       await this.refreshSessionService.rotateSession(session, refreshExpires);
-    return { accessToken, refreshPlain };
+    return {
+      accessToken,
+      refreshPlain,
+      absoluteExpiresAt: session.absoluteExpiresAt,
+    };
   }
 
   async mintAccessFromRefreshSession(
@@ -85,13 +110,19 @@ export class AuthRefreshService {
       if (!organization) {
         throw new UnauthorizedException('Organization not found');
       }
-      return this.authService.mintAccessToken({
-        sub: user.id,
-        organizationId: user.organizationId,
-        organizationSubdomain: organization.subdomain,
-        email: user.email,
-        role: user.role,
-      });
+      if (user.role === Role.ORG_ADMIN) {
+        await this.assertValidSubscriptionOrRevoke(session, organization.id);
+      }
+      return this.authService.mintAccessToken(
+        {
+          sub: user.id,
+          organizationId: user.organizationId,
+          organizationSubdomain: organization.subdomain,
+          email: user.email,
+          role: user.role,
+        },
+        session.absoluteExpiresAt,
+      );
     }
 
     if (session.sessionKind === 'employee') {
@@ -105,6 +136,7 @@ export class AuthRefreshService {
         await this.refreshSessionService.revokeSession(session.id);
         throw new UnauthorizedException('Organization not found');
       }
+      await this.assertValidSubscriptionOrRevoke(session, organization.id);
       const tenantDs =
         await this.tenantConnectionManager.getOrCreateConnection(organization);
       const employee = await this.employeesService.findById(
@@ -119,18 +151,36 @@ export class AuthRefreshService {
         await this.refreshSessionService.revokeSession(session.id);
         throw new ForbiddenException('Employee account is no longer active');
       }
-      return this.authService.mintAccessToken({
-        sub: employee.id,
-        organizationId: organization.id,
-        organizationSubdomain: organization.subdomain,
-        email: employee.email,
-        role: employee.role,
-        employeeCode: employee.employeeCode,
-        name: employee.name,
-      });
+      return this.authService.mintAccessToken(
+        {
+          sub: employee.id,
+          organizationId: organization.id,
+          organizationSubdomain: organization.subdomain,
+          email: employee.email,
+          role: employee.role,
+          employeeCode: employee.employeeCode,
+          name: employee.name,
+          mustChangePassword: employee.mustChangePassword,
+        },
+        session.absoluteExpiresAt,
+      );
     }
 
     throw new UnauthorizedException('Invalid refresh session');
+  }
+
+  private async assertValidSubscriptionOrRevoke(
+    session: RefreshSession,
+    organizationId: string,
+  ): Promise<void> {
+    try {
+      await this.subscriptionService.assertOrganizationHasValidSubscription(
+        organizationId,
+      );
+    } catch (error) {
+      await this.refreshSessionService.revokeSession(session.id);
+      throw error;
+    }
   }
 
   async logout(req: Request, res: Response): Promise<{ ok: true }> {

@@ -13,6 +13,17 @@ import { Department } from './entities/department.entity';
 import { Designation } from './entities/designation.entity';
 import { AssignReportingManagerDto } from './dto/assign-reporting-manager.dto';
 import { ListReportingManagersQueryDto } from './dto/list-reporting-managers-query.dto';
+import { RbacEmployeeRoleAssignment } from '../rbac/entities/rbac-employee-role-assignment.entity';
+import { RbacRole } from '../rbac/entities/rbac-role.entity';
+
+const REPORTING_MANAGER_ROLE_CODE = 'MANAGER';
+
+export type ReportingManagerCandidate = {
+  id: string;
+  name: string;
+  employeeCode: string;
+  status: string;
+};
 
 export type ReportingManagerListItem = {
   employeeId: string;
@@ -134,6 +145,43 @@ export class ReportingManagersService {
     return items.find((i) => i.employeeId === employeeId) ?? null;
   }
 
+  async listManagerCandidates(
+    dataSource: DataSource,
+    visibleEmployeeIds: string[] | null,
+  ): Promise<ReportingManagerCandidate[]> {
+    if (visibleEmployeeIds !== null && visibleEmployeeIds.length === 0) {
+      return [];
+    }
+
+    const qb = this.createManagerRoleEmployeeQuery(dataSource);
+    if (visibleEmployeeIds !== null) {
+      qb.andWhere('e.id IN (:...visibleIds)', { visibleIds: visibleEmployeeIds });
+    }
+
+    const rows = await qb.getRawMany<ReportingManagerCandidate>();
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      employeeCode: row.employeeCode,
+      status: row.status,
+    }));
+  }
+
+  async assertEligibleReportingManager(
+    dataSource: DataSource,
+    managerEmployeeId: string,
+  ): Promise<void> {
+    const row = await this.createManagerRoleEmployeeQuery(dataSource)
+      .andWhere('e.id = :managerEmployeeId', { managerEmployeeId })
+      .getRawOne();
+
+    if (!row) {
+      throw new BadRequestException(
+        'Selected employee does not have the Manager role',
+      );
+    }
+  }
+
   async assignOrChange(
     dataSource: DataSource,
     employeeId: string,
@@ -166,6 +214,7 @@ export class ReportingManagersService {
       throw new BadRequestException('Terminated employees cannot be reporting managers');
     }
 
+    await this.assertEligibleReportingManager(dataSource, managerEmployeeId);
     await this.assertNoCycle(dataSource, employeeId, managerEmployeeId);
 
     const effectiveFrom =
@@ -222,6 +271,41 @@ export class ReportingManagersService {
 
     active.effectiveTo = new Date().toISOString().slice(0, 10);
     await repo.save(active);
+  }
+
+  private createManagerRoleEmployeeQuery(dataSource: DataSource) {
+    const today = new Date().toISOString().slice(0, 10);
+
+    return dataSource
+      .getRepository(Employee)
+      .createQueryBuilder('e')
+      .innerJoin(
+        RbacEmployeeRoleAssignment,
+        'a',
+        'a.employeeId = e.id',
+      )
+      .innerJoin(RbacRole, 'r', 'r.id = a.roleId')
+      .where('e.deletedAt IS NULL')
+      .andWhere('e.status != :terminated', {
+        terminated: EmployeeStatus.TERMINATED,
+      })
+      .andWhere('r.code = :roleCode', {
+        roleCode: REPORTING_MANAGER_ROLE_CODE,
+      })
+      .andWhere('r.isActive = true')
+      .andWhere('(a.effectiveFrom IS NULL OR a.effectiveFrom <= :today)', {
+        today,
+      })
+      .andWhere('(a.effectiveTo IS NULL OR a.effectiveTo >= :today)', {
+        today,
+      })
+      .select([
+        'e.id AS id',
+        'e.name AS name',
+        'e.employeeCode AS "employeeCode"',
+        'e.status AS status',
+      ])
+      .orderBy('e.name', 'ASC');
   }
 
   private async getActivePrimaryRow(

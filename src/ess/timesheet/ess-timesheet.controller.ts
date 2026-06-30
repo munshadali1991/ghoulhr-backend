@@ -6,23 +6,21 @@ import {
   Param,
   Post,
   Put,
-  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { TenantAuthGuard } from '../../auth/guards/tenant-auth.guard';
+import { SubscriptionGuard } from '../../subscriptions/guards/subscription.guard';
 import { PermissionsGuard } from '../../rbac/guards/permissions.guard';
 import { RequirePermissions } from '../../rbac/decorators/require-permissions.decorator';
 import type { TenantRequest } from '../../common/middleware/tenant-resolver.middleware';
 import { EssTimesheetService } from './ess-timesheet.service';
 import { UpsertTimesheetDayDto } from './dto/upsert-timesheet-day.dto';
-import { TimesheetReportQueryDto } from './dto/timesheet-report-query.dto';
-import { TimesheetEntryReportQueryDto } from './dto/timesheet-entry-report-query.dto';
 
 @ApiTags('ESS Timesheet')
 @ApiBearerAuth()
-@UseGuards(TenantAuthGuard, PermissionsGuard)
+@UseGuards(TenantAuthGuard, SubscriptionGuard, PermissionsGuard)
 @Controller('ess/timesheet')
 export class EssTimesheetController {
   constructor(private readonly timesheetService: EssTimesheetService) {}
@@ -93,30 +91,6 @@ export class EssTimesheetController {
       req.user!.sub,
       date,
       dto,
-    );
-  }
-
-  @Get('reports')
-  @RequirePermissions('ess.timesheet:read')
-  @ApiOperation({ summary: 'Timesheet reports (daily / weekly / monthly)' })
-  getReports(@Req() req: TenantRequest, @Query() query: TimesheetReportQueryDto) {
-    return this.timesheetService.getReports(
-      req.tenantDataSource!,
-      req.organization!.id,
-      req.user!.sub,
-      query,
-    );
-  }
-
-  @Get('report-entries')
-  @RequirePermissions('ess.timesheet:read')
-  @ApiOperation({ summary: 'Flat timesheet entry rows for My Report table' })
-  getReportEntries(@Req() req: TenantRequest, @Query() query: TimesheetEntryReportQueryDto) {
-    return this.timesheetService.getReportEntries(
-      req.tenantDataSource!,
-      req.organization!.id,
-      req.user!.sub,
-      query,
     );
   }
 }

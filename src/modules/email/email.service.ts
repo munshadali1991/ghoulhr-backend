@@ -1,101 +1,156 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { SesMailerService } from './ses-mailer.service';
+import { renderEmployeeCreatedEmail } from './templates/employee-created.template';
+import { renderLeaveAppliedEmail } from './templates/leave-applied.template';
+import { renderLeaveApprovedEmail } from './templates/leave-approved.template';
+import { renderTimesheetApprovedEmail } from './templates/timesheet-approved.template';
+import { renderAccountActivatedEmail } from './templates/account-activated.template';
 
-export interface SendAdminCredentialsDto {
+export interface SendEmployeeCreatedEmailDto {
   to: string;
+  employeeName: string;
   organizationName: string;
   subdomain: string;
   email: string;
-  password: string;
+  temporaryPassword: string;
+  departmentName?: string;
+  designationName?: string;
 }
 
-export interface SendEmployeeCredentialsDto {
+export interface SendLeaveAppliedEmailDto {
   to: string;
-  organizationName: string;
-  email: string;
-  password: string;
-}
-
-export interface SendLeaveAppliedNotificationDto {
-  to: string;
-  recipientName: string;
+  approverName: string;
   applicantName: string;
   leaveType: string;
   startDate: string;
   endDate: string;
-  body: string;
+  reason?: string;
+}
+
+export interface SendLeaveApprovedEmailDto {
+  to: string;
+  recipientName: string;
+  leaveType: string;
+  startDate: string;
+  endDate: string;
+  notes?: string;
+}
+
+export interface SendTimesheetApprovedEmailDto {
+  to: string;
+  employeeName: string;
+  approverName: string;
+  entries: Array<{ workDate: string; totalHours: number }>;
+}
+
+export interface SendAccountActivatedEmailDto {
+  to: string;
+  employeeName: string;
+  organizationName: string;
+  subdomain: string;
 }
 
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
 
-  /**
-   * Send admin credentials email when a new organization is created
-   */
-  async sendAdminCredentials(params: SendAdminCredentialsDto): Promise<void> {
-    // TODO: Replace with actual email sending logic
-    // Example: Using nodemailer, sendgrid, aws ses, etc.
+  constructor(
+    private readonly sesMailer: SesMailerService,
+    private readonly configService: ConfigService,
+  ) {}
 
-    this.logger.log(
-      `Sending admin credentials email to ${params.to} for organization "${params.organizationName}"`,
-    );
-    this.logger.log(`Login URL: https://${params.subdomain}.ghoulhr.com/login`);
-    this.logger.log(`Email: ${params.email}`);
-    this.logger.log(`Password: ${params.password}`);
+  async sendEmployeeCreated(
+    params: SendEmployeeCreatedEmailDto,
+  ): Promise<void> {
+    const loginUrl = this.buildTenantLoginUrl(params.subdomain);
+    const rendered = renderEmployeeCreatedEmail({
+      employeeName: params.employeeName,
+      organizationName: params.organizationName,
+      email: params.email,
+      temporaryPassword: params.temporaryPassword,
+      loginUrl,
+      departmentName: params.departmentName,
+      designationName: params.designationName,
+    });
 
-    // Future implementation example:
-    // await this.mailerService.sendMail({
-    //   to: params.to,
-    //   subject: `Welcome to ${params.organizationName} - Your Admin Credentials`,
-    //   template: 'admin-credentials',
-    //   context: {
-    //     organizationName: params.organizationName,
-    //     subdomain: params.subdomain,
-    //     email: params.email,
-    //     password: params.password,
-    //     loginUrl: `https://${params.subdomain}.ghoulhr.com/login`,
-    //   },
-    // });
+    await this.sesMailer.sendMail({
+      to: params.to,
+      ...rendered,
+    });
   }
 
-  /**
-   * Send employee credentials email when a new employee is onboarded
-   */
-  async sendEmployeeCredentials(
-    params: SendEmployeeCredentialsDto,
-  ): Promise<void> {
-    // TODO: Replace with actual email sending logic
+  async sendLeaveApplied(params: SendLeaveAppliedEmailDto): Promise<void> {
+    const rendered = renderLeaveAppliedEmail({
+      approverName: params.approverName,
+      applicantName: params.applicantName,
+      leaveType: params.leaveType,
+      startDate: params.startDate,
+      endDate: params.endDate,
+      reason: params.reason,
+    });
 
-    this.logger.log(
-      `Sending employee credentials email to ${params.to} for organization "${params.organizationName}"`,
-    );
-    this.logger.log(`Email: ${params.email}`);
-    this.logger.log(`Password: ${params.password}`);
-
-    // Future implementation example:
-    // await this.mailerService.sendMail({
-    //   to: params.to,
-    //   subject: `Welcome to ${params.organizationName} - Your Employee Credentials`,
-    //   template: 'employee-credentials',
-    //   context: {
-    //     organizationName: params.organizationName,
-    //     email: params.email,
-    //     password: params.password,
-    //   },
-    // });
+    await this.sesMailer.sendMail({
+      to: params.to,
+      ...rendered,
+    });
   }
 
-  /**
-   * Notify an employee that a colleague applied for leave (Cc / org-wide).
-   */
-  async sendLeaveAppliedNotification(
-    params: SendLeaveAppliedNotificationDto,
+  async sendLeaveApproved(params: SendLeaveApprovedEmailDto): Promise<void> {
+    const rendered = renderLeaveApprovedEmail({
+      recipientName: params.recipientName,
+      leaveType: params.leaveType,
+      startDate: params.startDate,
+      endDate: params.endDate,
+      notes: params.notes,
+    });
+
+    await this.sesMailer.sendMail({
+      to: params.to,
+      ...rendered,
+    });
+  }
+
+  async sendTimesheetApproved(
+    params: SendTimesheetApprovedEmailDto,
   ): Promise<void> {
-    this.logger.log(
-      `Leave Cc notification to ${params.to} (${params.recipientName}): ${params.body}`,
-    );
-    this.logger.log(
-      `Applicant: ${params.applicantName}, type: ${params.leaveType}, ${params.startDate} – ${params.endDate}`,
-    );
+    if (params.entries.length === 0) {
+      return;
+    }
+
+    const rendered = renderTimesheetApprovedEmail({
+      employeeName: params.employeeName,
+      approverName: params.approverName,
+      entries: params.entries,
+    });
+
+    await this.sesMailer.sendMail({
+      to: params.to,
+      ...rendered,
+    });
+  }
+
+  async sendAccountActivated(
+    params: SendAccountActivatedEmailDto,
+  ): Promise<void> {
+    const loginUrl = this.buildTenantLoginUrl(params.subdomain);
+    const rendered = renderAccountActivatedEmail({
+      employeeName: params.employeeName,
+      organizationName: params.organizationName,
+      loginUrl,
+    });
+
+    await this.sesMailer.sendMail({
+      to: params.to,
+      ...rendered,
+    });
+  }
+
+  private buildTenantLoginUrl(subdomain: string): string {
+    const appDomain = this.configService.get<string>('APP_DOMAIN') || 'ghoulhr.com';
+    const host = subdomain?.trim()
+      ? `${subdomain.trim()}.${appDomain}`
+      : appDomain;
+    return `https://${host}/login`;
   }
 }

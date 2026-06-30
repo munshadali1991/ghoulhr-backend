@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { OrganizationModuleEntitlement } from './entities/organization-module-entitlement.entity';
 import { PlatformModule } from './entities/platform-module.entity';
-import { ALL_PLATFORM_MODULE_CODES } from './constants/platform-modules.constant';
+import { ALL_PLATFORM_MODULE_CODES, PLATFORM_MODULES } from './constants/platform-modules.constant';
 
 @Injectable()
 export class OrganizationEntitlementService {
@@ -101,6 +101,48 @@ export class OrganizationEntitlementService {
 
     this.invalidateCache(organizationId);
     return this.getOrganizationEntitlements(organizationId);
+  }
+
+  /** Upsert platform module catalog rows from code (e.g. after adding dashboard module). */
+  async syncPlatformModulesFromCatalog(): Promise<void> {
+    for (const [index, mod] of PLATFORM_MODULES.entries()) {
+      let row = await this.moduleRepo.findOne({ where: { code: mod.code } });
+      if (!row) {
+        row = this.moduleRepo.create({
+          code: mod.code,
+          name: mod.name,
+          description: mod.description,
+          isActive: true,
+          sortOrder: index + 1,
+        });
+      } else {
+        row.name = mod.name;
+        row.description = mod.description;
+        row.isActive = true;
+        if (!row.sortOrder) row.sortOrder = index + 1;
+      }
+      await this.moduleRepo.save(row);
+    }
+  }
+
+  /** Enable newly added modules for orgs that already have entitlement rows. */
+  async ensureMissingModuleEntitlements(organizationId: string, enabledBy?: string) {
+    for (const code of ALL_PLATFORM_MODULE_CODES) {
+      const exists = await this.entitlementRepo.findOne({
+        where: { organizationId, moduleCode: code },
+      });
+      if (exists) continue;
+      await this.entitlementRepo.save(
+        this.entitlementRepo.create({
+          organizationId,
+          moduleCode: code,
+          enabled: true,
+          enabledAt: new Date(),
+          enabledBy,
+        }),
+      );
+    }
+    this.invalidateCache(organizationId);
   }
 
   async enableAllModulesForOrganization(organizationId: string, enabledBy?: string) {
