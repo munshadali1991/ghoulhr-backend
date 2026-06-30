@@ -462,8 +462,9 @@ Run all tenants: `npm run tenant:migrate` → `scripts/run-tenant-migrations.cjs
 | Variable | Purpose |
 |----------|---------|
 | `JWT_SECRET` / `AUTH_TOKEN_SECRET` | HMAC signing (encryption fallback) |
-| `JWT_ACCESS_EXPIRES_IN` / `JWT_EXPIRES_IN` | Access token TTL |
-| `JWT_REFRESH_EXPIRES_IN` | Refresh token TTL |
+| `JWT_ACCESS_EXPIRES_IN` / `JWT_EXPIRES_IN` | Access token TTL (prefer `JWT_ACCESS_EXPIRES_IN`, e.g. `15m`) |
+| `JWT_REFRESH_EXPIRES_IN` | Refresh token sliding TTL (e.g. `7d`) |
+| `AUTH_SESSION_MAX_LIFETIME` | Absolute session cap from login (e.g. `24h`); enforced server-side |
 | `AUTH_ACCESS_COOKIE_NAME` / `AUTH_REFRESH_COOKIE_NAME` | Cookie names |
 | `COOKIE_SECURE` | Force `Secure` cookies |
 | `COOKIE_SAMESITE` | `lax` (default), `strict`, or `none` |

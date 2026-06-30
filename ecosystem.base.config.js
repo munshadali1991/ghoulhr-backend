@@ -1,11 +1,12 @@
 const dotenv = require('dotenv');
-const { pickStorageEnv } = require('./scripts/pm2-env-shared.cjs');
+const { pickStorageEnv, pickEmailEnv } = require('./scripts/pm2-env-shared.cjs');
 
 dotenv.config({ path: `${__dirname}/.env` });
 
 const sharedNestEnv = {
   NODE_ENV: process.env.NODE_ENV || 'local',
   ...pickStorageEnv(),
+  ...pickEmailEnv(),
 };
 
 module.exports = {

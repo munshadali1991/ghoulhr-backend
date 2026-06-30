@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { Client } = require('pg');
 const dotenv = require('dotenv');
-const { pickStorageEnv } = require('./pm2-env-shared.cjs');
+const { pickStorageEnv, pickEmailEnv } = require('./pm2-env-shared.cjs');
 
 dotenv.config();
 
@@ -29,6 +29,7 @@ function buildApp(name, env = {}) {
     env: {
       NODE_ENV: process.env.NODE_ENV || 'local',
       ...pickStorageEnv(),
+      ...pickEmailEnv(),
       ...env,
     },
   };

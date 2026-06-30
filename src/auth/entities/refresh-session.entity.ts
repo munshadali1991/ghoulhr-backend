@@ -42,6 +42,10 @@ export class RefreshSession {
   @Column({ type: 'timestamptz' })
   expiresAt: Date;
 
+  /** Absolute session deadline from initial login (not extended on refresh). */
+  @Column({ type: 'timestamptz' })
+  absoluteExpiresAt: Date;
+
   @Column({ type: 'timestamptz', nullable: true })
   revokedAt: Date | null;
 

@@ -25,6 +25,7 @@ import {
 import type { Response } from 'express';
 import { memoryStorage } from 'multer';
 import { TenantAuthGuard } from '../auth/guards/tenant-auth.guard';
+import { SubscriptionGuard } from '../subscriptions/guards/subscription.guard';
 import type { TenantRequest } from '../common/middleware/tenant-resolver.middleware';
 import {
   RequireAnyPermission,
@@ -37,7 +38,7 @@ import { StorageService } from './storage.service';
 
 @ApiTags('Storage')
 @ApiBearerAuth()
-@UseGuards(TenantAuthGuard, PermissionsGuard)
+@UseGuards(TenantAuthGuard, SubscriptionGuard, PermissionsGuard)
 @Controller('storage')
 export class StorageController {
   constructor(private readonly storageService: StorageService) {}

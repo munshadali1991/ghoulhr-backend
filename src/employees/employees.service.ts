@@ -1320,15 +1320,25 @@ export class EmployeesService {
     employeeId: string,
     newPassword: string,
     dataSource: DataSource,
-  ): Promise<void> {
+  ): Promise<{ activated: boolean }> {
     const repo = dataSource.getRepository(Employee);
+    const employee = await repo.findOne({ where: { id: employeeId } });
+
+    if (!employee) {
+      throw new BadRequestException('Employee not found');
+    }
+
+    const activated = employee.status === EmployeeStatus.PENDING_ACTIVATION;
     const hashedPassword = await this.passwordService.hashPassword(newPassword);
 
     await repo.update(employeeId, {
       password: hashedPassword,
       mustChangePassword: false,
       passwordChangedAt: new Date(),
+      ...(activated ? { status: EmployeeStatus.ACTIVE } : {}),
     });
+
+    return { activated };
   }
 
   /**

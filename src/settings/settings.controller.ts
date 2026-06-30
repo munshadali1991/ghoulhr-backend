@@ -28,13 +28,14 @@ import {
 } from './dto/timesheet-category.dto';
 import { TimesheetCategoryService } from './timesheet-category.service';
 import { TenantAuthGuard } from '../auth/guards/tenant-auth.guard';
+import { SubscriptionGuard } from '../subscriptions/guards/subscription.guard';
 import { PermissionsGuard } from '../rbac/guards/permissions.guard';
 import { RequirePermissions, RequireAnyPermission } from '../rbac/decorators/require-permissions.decorator';
 import type { TenantRequest } from '../common/middleware/tenant-resolver.middleware';
 
 @ApiTags('Settings')
 @ApiBearerAuth()
-@UseGuards(TenantAuthGuard, PermissionsGuard)
+@UseGuards(TenantAuthGuard, SubscriptionGuard, PermissionsGuard)
 @Controller('settings')
 export class SettingsController {
   constructor(

@@ -13,7 +13,6 @@ import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { User } from '../users/user.entity';
 import { UsersService } from '../users/users.service';
 import { Role } from '../roles/roles.enum';
-import { EmailService } from '../modules/email';
 import { TenantConnectionManager } from '../core/database/tenant-connection.manager';
 import { MigrationRunnerService } from '../core/database/migration-runner.service';
 import { EmployeesService } from '../employees/employees.service';
@@ -22,6 +21,7 @@ import { OrganizationStatus } from './organization-status.enum';
 import { OrganizationEntitlementService } from '../rbac/organization-entitlement.service';
 import { RbacSeedService } from '../rbac/rbac-seed.service';
 import { TenantSslProvisioningService } from './tenant-ssl-provisioning.service';
+import { OrganizationSubscriptionService } from '../subscriptions/organization-subscription.service';
 
 @Injectable()
 export class OrganizationsService {
@@ -35,7 +35,6 @@ export class OrganizationsService {
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
     private readonly usersService: UsersService,
-    private readonly emailService: EmailService,
     private readonly tenantConnectionManager: TenantConnectionManager,
     private readonly migrationRunner: MigrationRunnerService,
     private readonly employeesService: EmployeesService,
@@ -43,6 +42,7 @@ export class OrganizationsService {
     private readonly entitlementService: OrganizationEntitlementService,
     private readonly rbacSeedService: RbacSeedService,
     private readonly tenantSslProvisioningService: TenantSslProvisioningService,
+    private readonly subscriptionService: OrganizationSubscriptionService,
   ) {}
 
   async create(dto: CreateOrganizationDto) {
@@ -118,20 +118,11 @@ export class OrganizationsService {
         .trim()
         .toLowerCase();
       if (adminEmail) {
-        const adminProvisioned = await this.ensureOrgAdminExists(
+        await this.ensureOrgAdminExists(
           savedOrganization,
           adminEmail,
         );
         await this.ensureOrgAdminRbacRole(savedOrganization, adminEmail);
-        if (adminProvisioned) {
-          await this.emailService.sendAdminCredentials({
-            to: adminEmail,
-            organizationName: savedOrganization.name,
-            subdomain: savedOrganization.subdomain,
-            email: adminEmail,
-            password: this.DEFAULT_ADMIN_PASSWORD,
-          });
-        }
       }
 
       void this.tenantSslProvisioningService.provisionForSubdomain(
@@ -174,8 +165,20 @@ export class OrganizationsService {
     }
   }
 
-  findAll() {
-    return this.organizationRepo.find();
+  async findAll() {
+    const organizations = await this.organizationRepo.find();
+    const summaries =
+      await this.subscriptionService.getSummariesForOrganizationIds(
+        organizations.map((org) => org.id),
+      );
+
+    return organizations.map((org) => ({
+      ...org,
+      subscriptionSummary: summaries.get(org.id) ?? {
+        isValid: false,
+        reason: 'missing' as const,
+      },
+    }));
   }
 
   findAllActive() {

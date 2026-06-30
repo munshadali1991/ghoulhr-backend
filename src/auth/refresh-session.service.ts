@@ -25,6 +25,7 @@ export class RefreshSessionService {
   async issueMasterSession(
     masterUserId: string,
     expiresAt: Date,
+    absoluteExpiresAt: Date,
   ): Promise<{ plain: string; id: string }> {
     const plain = this.newRefreshPlain();
     const saved = await this.refreshRepo.save(
@@ -35,6 +36,7 @@ export class RefreshSessionService {
         employeeId: null,
         organizationId: null,
         expiresAt,
+        absoluteExpiresAt,
         revokedAt: null,
         replacedBySessionId: null,
       }),
@@ -46,6 +48,7 @@ export class RefreshSessionService {
     employeeId: string,
     organizationId: string,
     expiresAt: Date,
+    absoluteExpiresAt: Date,
   ): Promise<{ plain: string; id: string }> {
     const plain = this.newRefreshPlain();
     const saved = await this.refreshRepo.save(
@@ -56,6 +59,7 @@ export class RefreshSessionService {
         employeeId,
         organizationId,
         expiresAt,
+        absoluteExpiresAt,
         revokedAt: null,
         replacedBySessionId: null,
       }),
@@ -73,7 +77,11 @@ export class RefreshSessionService {
     if (!row || row.revokedAt) {
       return null;
     }
-    if (row.expiresAt.getTime() <= Date.now()) {
+    const now = Date.now();
+    if (row.expiresAt.getTime() <= now) {
+      return null;
+    }
+    if (row.absoluteExpiresAt.getTime() <= now) {
       return null;
     }
     return row;
@@ -96,6 +104,7 @@ export class RefreshSessionService {
         employeeId: previous.employeeId,
         organizationId: previous.organizationId,
         expiresAt: newExpiresAt,
+        absoluteExpiresAt: previous.absoluteExpiresAt,
         revokedAt: null,
         replacedBySessionId: null,
       }),

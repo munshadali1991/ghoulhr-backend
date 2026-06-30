@@ -65,6 +65,8 @@ export class AuthSessionService {
 
         const enrichedUser = {
           ...user,
+          mustChangePassword: employeeRecord.mustChangePassword,
+          status: employeeRecord.status,
           ...(profilePhotoUrl ? { profilePhotoUrl } : {}),
         };
 
@@ -114,6 +116,9 @@ export class AuthSessionService {
       role: payload.role,
       ...(payload.employeeCode ? { employeeCode: payload.employeeCode } : {}),
       ...(payload.name ? { name: payload.name } : {}),
+      ...(payload.mustChangePassword
+        ? { mustChangePassword: true }
+        : { mustChangePassword: false }),
     };
   }
 }

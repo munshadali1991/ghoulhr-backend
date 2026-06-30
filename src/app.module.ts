@@ -1,5 +1,6 @@
 import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -18,6 +19,7 @@ import { EssModule } from './ess/ess.module';
 import { RbacModule } from './rbac/rbac.module';
 import { StorageModule } from './storage/storage.module';
 import { HrDashboardModule } from './hr-dashboard/hr-dashboard.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 
 @Module({
   imports: [
@@ -29,11 +31,13 @@ import { HrDashboardModule } from './hr-dashboard/hr-dashboard.module';
           ? `${process.cwd()}/.env.production`
           : `${process.cwd()}/.env`,
     }),
+    ScheduleModule.forRoot(),
     DatabaseModule,
     DatabaseCoreModule,
     AuthModule,
     UsersModule,
     OrganizationsModule,
+    SubscriptionsModule,
     EmployeesModule,
     SettingsModule,
     EssModule,

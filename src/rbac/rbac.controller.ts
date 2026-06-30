@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { TenantAuthGuard } from '../auth/guards/tenant-auth.guard';
+import { SubscriptionGuard } from '../subscriptions/guards/subscription.guard';
 import { PermissionsGuard } from './guards/permissions.guard';
 import { RequirePermissions } from './decorators/require-permissions.decorator';
 import { RbacAdminService } from './rbac-admin.service';
@@ -30,7 +31,7 @@ import {
 @ApiTags('RBAC')
 @ApiBearerAuth()
 @Controller('rbac')
-@UseGuards(TenantAuthGuard, PermissionsGuard)
+@UseGuards(TenantAuthGuard, SubscriptionGuard, PermissionsGuard)
 export class RbacController {
   constructor(private readonly rbacAdminService: RbacAdminService) {}
 

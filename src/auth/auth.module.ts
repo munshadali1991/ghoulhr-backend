@@ -1,4 +1,5 @@
 import { Global, Module, forwardRef } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -19,6 +20,9 @@ import { AuthCookieService } from './auth-cookie.service';
 import { AuthRefreshService } from './auth-refresh.service';
 import { AuthSessionService } from './auth-session.service';
 import { AuthHandoffService } from './auth-handoff.service';
+import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
+import { EmailModule } from '../modules/email';
+import { MustChangePasswordGuard } from './guards/must-change-password.guard';
 
 @Global()
 @Module({
@@ -26,8 +30,10 @@ import { AuthHandoffService } from './auth-handoff.service';
     TypeOrmModule.forFeature([RefreshSession, AuthHandoffToken]),
     UsersModule,
     forwardRef(() => OrganizationsModule),
+    SubscriptionsModule,
     forwardRef(() => EmployeesModule),
     DatabaseCoreModule,
+    EmailModule,
   ],
   controllers: [AuthController, TenantAuthController],
   providers: [
@@ -42,6 +48,11 @@ import { AuthHandoffService } from './auth-handoff.service';
     AuthRefreshService,
     AuthSessionService,
     AuthHandoffService,
+    MustChangePasswordGuard,
+    {
+      provide: APP_GUARD,
+      useClass: MustChangePasswordGuard,
+    },
   ],
   exports: [
     AuthService,

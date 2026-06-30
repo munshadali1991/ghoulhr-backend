@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { TenantAuthGuard } from '../../auth/guards/tenant-auth.guard';
+import { SubscriptionGuard } from '../../subscriptions/guards/subscription.guard';
 import { PermissionsGuard } from '../../rbac/guards/permissions.guard';
 import { RequirePermissions } from '../../rbac/decorators/require-permissions.decorator';
 import type { TenantRequest } from '../../common/middleware/tenant-resolver.middleware';
@@ -20,7 +21,7 @@ import { SignPunchDto } from './dto/sign-punch.dto';
 
 @ApiTags('ESS Attendance')
 @ApiBearerAuth()
-@UseGuards(TenantAuthGuard, PermissionsGuard)
+@UseGuards(TenantAuthGuard, SubscriptionGuard, PermissionsGuard)
 @Controller('ess/attendance')
 export class EssAttendanceController {
   constructor(private readonly attendanceService: EssAttendanceService) {}

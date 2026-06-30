@@ -13,7 +13,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { EmployeesService } from './employees.service';
+import { EmployeesService, type CreateEmployeeResult } from './employees.service';
 import { ReportingManagersService } from './reporting-managers.service';
 import { AssignReportingManagerDto } from './dto/assign-reporting-manager.dto';
 import { ListReportingManagersQueryDto } from './dto/list-reporting-managers-query.dto';
@@ -28,16 +28,18 @@ import {
 } from './dto/employee-onboarding.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { TenantAuthGuard } from '../auth/guards/tenant-auth.guard';
+import { SubscriptionGuard } from '../subscriptions/guards/subscription.guard';
 import { PermissionsGuard } from '../rbac/guards/permissions.guard';
 import { RequirePermissions } from '../rbac/decorators/require-permissions.decorator';
 import { AuthorizationService } from '../rbac/authorization.service';
 import { EmployeeScopeService } from '../rbac/employee-scope.service';
 import type { TenantRequest } from '../common/middleware/tenant-resolver.middleware';
+import { EmailService } from '../modules/email';
 
 @ApiTags('Employees')
 @ApiBearerAuth()
 @Controller('employees')
-@UseGuards(TenantAuthGuard, PermissionsGuard)
+@UseGuards(TenantAuthGuard, SubscriptionGuard, PermissionsGuard)
 export class EmployeesController {
   private readonly logger = new Logger(EmployeesController.name);
 
@@ -46,6 +48,7 @@ export class EmployeesController {
     private readonly reportingManagersService: ReportingManagersService,
     private readonly authorizationService: AuthorizationService,
     private readonly employeeScopeService: EmployeeScopeService,
+    private readonly emailService: EmailService,
   ) {}
 
   @Get()
@@ -98,6 +101,7 @@ export class EmployeesController {
       actorSub,
       req.organization?.id,
     );
+    this.notifyEmployeeCreated(req, result);
     return {
       employee: {
         id: result.employee.id,
@@ -269,6 +273,8 @@ export class EmployeesController {
       req.organization?.id,
     );
 
+    this.notifyEmployeeCreated(req, result);
+
     return {
       employee: {
         id: result.employee.id,
@@ -334,5 +340,26 @@ export class EmployeesController {
       req.user?.sub || '',
       req.organization?.id,
     );
+  }
+
+  private notifyEmployeeCreated(
+    req: TenantRequest,
+    result: CreateEmployeeResult,
+  ): void {
+    const organization = req.organization;
+    if (!organization?.name || !result.employee.email) {
+      return;
+    }
+
+    void this.emailService.sendEmployeeCreated({
+      to: result.employee.email,
+      employeeName: result.employee.name,
+      organizationName: organization.name,
+      subdomain: organization.subdomain ?? '',
+      email: result.employee.email,
+      temporaryPassword: result.temporaryPassword,
+      departmentName: result.departmentName,
+      designationName: result.designationName,
+    });
   }
 }

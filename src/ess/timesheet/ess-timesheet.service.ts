@@ -27,6 +27,7 @@ import { TimesheetCategoryService } from '../../settings/timesheet-category.serv
 import { TimesheetCategory } from '../entities/timesheet-category.entity';
 import { EmployeeScopeService } from '../../rbac/employee-scope.service';
 import { AuthorizationService } from '../../rbac/authorization.service';
+import { EmailService } from '../../modules/email/email.service';
 
 function parseDateKey(date: string): Date {
   const [y, m, d] = date.split('-').map(Number);
@@ -72,6 +73,7 @@ export class EssTimesheetService {
     private readonly categoryService: TimesheetCategoryService,
     private readonly employeeScopeService: EmployeeScopeService,
     private readonly authorizationService: AuthorizationService,
+    private readonly emailService: EmailService,
   ) {}
 
   async getCategories(dataSource: DataSource, organizationId: string) {
@@ -832,6 +834,7 @@ export class EssTimesheetService {
     let approvedCount = 0;
     let skippedCount = 0;
     const failures: { id: string; message: string }[] = [];
+    const approvedDays: TimesheetDay[] = [];
 
     for (const dayId of dayIds) {
       try {
@@ -847,6 +850,7 @@ export class EssTimesheetService {
         day.rejectedAt = null;
         day.rejectionReason = null;
         await repo.save(day);
+        approvedDays.push(day);
         approvedCount += 1;
       } catch (e) {
         const message =
@@ -859,6 +863,12 @@ export class EssTimesheetService {
         failures.push({ id: dayId, message });
       }
     }
+
+    void this.sendTimesheetApprovedEmails(
+      dataSource,
+      approverEmployeeId,
+      approvedDays,
+    );
 
     return { approvedCount, skippedCount, failures };
   }
@@ -882,6 +892,13 @@ export class EssTimesheetService {
     day.rejectedAt = null;
     day.rejectionReason = null;
     await dataSource.getRepository(TimesheetDay).save(day);
+
+    void this.sendTimesheetApprovedEmails(
+      dataSource,
+      approverEmployeeId,
+      [day],
+    );
+
     return { success: true, status: day.status };
   }
 
@@ -939,5 +956,73 @@ export class EssTimesheetService {
     }
 
     return day;
+  }
+
+  private formatTimesheetWorkDate(workDate: string | Date): string {
+    const iso =
+      typeof workDate === 'string' ? workDate : formatDateKey(workDate);
+    const [y, m, d] = iso.split('-').map(Number);
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return `${d} ${months[m - 1]} ${y}`;
+  }
+
+  private async sendTimesheetApprovedEmails(
+    dataSource: DataSource,
+    approverEmployeeId: string,
+    days: TimesheetDay[],
+  ): Promise<void> {
+    if (days.length === 0) {
+      return;
+    }
+
+    const approver = await dataSource.getRepository(Employee).findOne({
+      where: { id: approverEmployeeId },
+      select: ['id', 'name'],
+    });
+    const approverName = approver?.name ?? 'your manager';
+    const byEmployee = new Map<string, TimesheetDay[]>();
+
+    for (const day of days) {
+      if (!day.employee?.email) {
+        continue;
+      }
+      const existing = byEmployee.get(day.employeeId) ?? [];
+      existing.push(day);
+      byEmployee.set(day.employeeId, existing);
+    }
+
+    for (const employeeDays of byEmployee.values()) {
+      const employee = employeeDays[0].employee;
+      if (!employee?.email) {
+        continue;
+      }
+
+      const entries = employeeDays
+        .sort((a, b) => String(a.workDate).localeCompare(String(b.workDate)))
+        .map((day) => ({
+          workDate: this.formatTimesheetWorkDate(day.workDate),
+          totalHours: Number(day.totalHours),
+        }));
+
+      await this.emailService.sendTimesheetApproved({
+        to: employee.email,
+        employeeName: employee.name,
+        approverName,
+        entries,
+      });
+    }
   }
 }

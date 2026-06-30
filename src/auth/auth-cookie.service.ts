@@ -57,6 +57,7 @@ export class AuthCookieService {
     res: Response,
     accessToken: string,
     refreshToken: string,
+    sessionExpiresAt?: Date,
   ): void {
     const secure = this.isSecure();
     const sameSite = this.sameSite();
@@ -67,13 +68,17 @@ export class AuthCookieService {
       path: '/',
     } as const;
 
+    const sessionRemainingMs = sessionExpiresAt
+      ? Math.max(0, sessionExpiresAt.getTime() - Date.now())
+      : undefined;
+
     res.cookie(this.getAccessCookieName(), accessToken, {
       ...common,
-      maxAge: this.accessCookieMaxAgeMs(),
+      maxAge: this.capMaxAge(this.accessCookieMaxAgeMs(), sessionRemainingMs),
     });
     res.cookie(this.getRefreshCookieName(), refreshToken, {
       ...common,
-      maxAge: this.refreshCookieMaxAgeMs(),
+      maxAge: this.capMaxAge(this.refreshCookieMaxAgeMs(), sessionRemainingMs),
     });
   }
 
@@ -83,6 +88,13 @@ export class AuthCookieService {
     const opts = { httpOnly: true, secure, sameSite, path: '/' } as const;
     res.clearCookie(this.getAccessCookieName(), opts);
     res.clearCookie(this.getRefreshCookieName(), opts);
+  }
+
+  private capMaxAge(configuredMs: number, sessionRemainingMs?: number): number {
+    if (sessionRemainingMs === undefined) {
+      return configuredMs;
+    }
+    return Math.min(configuredMs, sessionRemainingMs);
   }
 
   private accessCookieMaxAgeMs(): number {

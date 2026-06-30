@@ -93,20 +93,6 @@ export class LeaveNotificationService {
         })),
       );
     }
-
-    await Promise.all(
-      recipients.map((recipient) =>
-        this.emailService.sendLeaveAppliedNotification({
-          to: recipient.email,
-          recipientName: recipient.name,
-          applicantName: applicant.name,
-          leaveType: leaveTypeName,
-          startDate,
-          endDate,
-          body,
-        }),
-      ),
-    );
   }
 
   async notifyApproverOnLeaveApplied(
@@ -138,14 +124,14 @@ export class LeaveNotificationService {
       body,
     });
 
-    await this.emailService.sendLeaveApprovalRequestNotification({
+    await this.emailService.sendLeaveApplied({
       to: approver.email,
       approverName: approver.name,
       applicantName: applicant.name,
       leaveType: leaveTypeName,
       startDate,
       endDate,
-      body,
+      reason: leaveRequest.reason ?? undefined,
     });
   }
 
@@ -187,24 +173,13 @@ export class LeaveNotificationService {
     });
 
     if (isApproved) {
-      await this.emailService.sendLeaveDecisionNotification({
+      await this.emailService.sendLeaveApproved({
         to: applicant.email,
         recipientName: applicant.name,
         leaveType: leaveTypeName,
         startDate,
         endDate,
-        decision: 'APPROVED',
-        body,
-      });
-    } else {
-      await this.emailService.sendLeaveDecisionNotification({
-        to: applicant.email,
-        recipientName: applicant.name,
-        leaveType: leaveTypeName,
-        startDate,
-        endDate,
-        decision: 'REJECTED',
-        body,
+        notes,
       });
     }
   }
