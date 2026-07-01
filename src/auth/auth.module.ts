@@ -19,6 +19,7 @@ import { RefreshSessionService } from './refresh-session.service';
 import { AuthCookieService } from './auth-cookie.service';
 import { AuthRefreshService } from './auth-refresh.service';
 import { AuthSessionService } from './auth-session.service';
+import { AuthActorService } from './auth-actor.service';
 import { AuthHandoffService } from './auth-handoff.service';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { EmailModule } from '../modules/email';
@@ -47,6 +48,7 @@ import { MustChangePasswordGuard } from './guards/must-change-password.guard';
     AuthCookieService,
     AuthRefreshService,
     AuthSessionService,
+    AuthActorService,
     AuthHandoffService,
     MustChangePasswordGuard,
     {
@@ -61,6 +63,7 @@ import { MustChangePasswordGuard } from './guards/must-change-password.guard';
     RolesGuard,
     AuthCookieService,
     AuthSessionService,
+    AuthActorService,
   ],
 })
 export class AuthModule {}

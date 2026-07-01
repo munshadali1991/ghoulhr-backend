@@ -5,7 +5,6 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { Request } from 'express';
 import {
   PERMISSIONS_KEY,
   PERMISSIONS_MODE_KEY,
@@ -13,6 +12,7 @@ import {
 } from '../decorators/require-permissions.decorator';
 import { AuthorizationService } from '../authorization.service';
 import { RbacConfigService } from '../rbac-config.service';
+import { AuthActorService } from '../../auth/auth-actor.service';
 import type { TenantRequest } from '../../common/middleware/tenant-resolver.middleware';
 
 @Injectable()
@@ -21,6 +21,7 @@ export class PermissionsGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly authorizationService: AuthorizationService,
     private readonly rbacConfig: RbacConfigService,
+    private readonly authActorService: AuthActorService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -66,8 +67,18 @@ export class PermissionsGuard implements CanActivate {
       throw new ForbiddenException('Tenant authorization context required');
     }
 
+    const employeeId = await this.authActorService.resolveTenantEmployeeId(
+      user,
+      tenantDataSource,
+    );
+    if (!employeeId) {
+      throw new ForbiddenException(
+        'Employee profile required for portal access',
+      );
+    }
+
     const authContext = {
-      employeeId: user.sub,
+      employeeId,
       organizationId,
       tenantDataSource,
     };

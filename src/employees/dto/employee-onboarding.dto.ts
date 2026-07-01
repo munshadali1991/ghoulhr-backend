@@ -409,10 +409,10 @@ export class OnboardingEmergencyContactDto {
 }
 
 export class OnboardingAccessDto {
-  @ApiProperty({ enum: ['EMPLOYEE', 'MANAGER', 'HR', 'PAYROLL', 'ADMIN'] })
+  @ApiPropertyOptional({ enum: ['EMPLOYEE', 'MANAGER', 'HR', 'PAYROLL', 'ADMIN'] })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  portalRoleLabel: string;
+  portalRoleLabel?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

@@ -298,7 +298,8 @@ export class EmployeesService {
     const hashedPassword =
       await this.passwordService.hashPassword(temporaryPassword);
     const passwordExpiresAt = this.passwordService.getTempPasswordExpiry();
-    const role = this.mapPortalRoleToEmployeeRole(access.portalRoleLabel);
+    const portalRoleLabel = access.portalRoleLabel?.trim() || 'EMPLOYEE';
+    const role = this.mapPortalRoleToEmployeeRole(portalRoleLabel);
 
     let probationEndDate = this.calculateProbationEndDate(
       employment.dateOfJoining,
@@ -475,7 +476,7 @@ export class EmployeesService {
             hrmsAccessEnabled: access.hrmsAccessEnabled ?? true,
             welcomeEmailEnabled: access.welcomeEmailEnabled ?? false,
             mfaEnabled: access.mfaEnabled ?? false,
-            portalRoleLabel: access.portalRoleLabel,
+            portalRoleLabel,
           }),
         );
 
@@ -528,7 +529,7 @@ export class EmployeesService {
     await this.assignEmployeeRbacRole(
       dataSource,
       savedEmployee.id,
-      portalRoleLabelToRoleCode(access.portalRoleLabel),
+      portalRoleLabelToRoleCode(portalRoleLabel),
       actorUuid,
     );
 
@@ -576,7 +577,6 @@ export class EmployeesService {
       throw new ConflictException('Another employee already uses this login email');
     }
 
-    const role = this.mapPortalRoleToEmployeeRole(access.portalRoleLabel || 'EMPLOYEE');
     const departmentMapping = await this.validateDepartmentAndDesignation(
       employment.departmentId,
       employment.designationId,
@@ -599,37 +599,56 @@ export class EmployeesService {
       ? this.fieldEncryption.encrypt(compliance.aadhaarNumber.replace(/\s/g, ''))
       : null;
 
+    const newTemporaryPassword = access?.temporaryPassword?.trim();
+    if (newTemporaryPassword) {
+      const strength = this.passwordService.validatePasswordStrength(
+        newTemporaryPassword,
+      );
+      if (!strength.valid) {
+        throw new BadRequestException(strength.errors[0]);
+      }
+    }
+
     return dataSource.transaction(async (em) => {
       const empRepo = em.getRepository(Employee);
+      const employeeUpdate: Partial<Employee> = {
+        ...existingEmployee,
+        organizationId: organizationId ?? existingEmployee.organizationId,
+        name: fullName,
+        email: loginEmail,
+        departmentId: employment.departmentId,
+        designationId: employment.designationId,
+        phoneNumber: basic.mobileNumber,
+        dateOfBirth: basic.dateOfBirth,
+        dateOfJoining: employment.dateOfJoining,
+        firstName: basic.firstName,
+        middleName: basic.middleName,
+        lastName: basic.lastName,
+        gender: basic.gender,
+        personalEmail,
+        officialEmail,
+        alternateMobile: basic.alternateMobile,
+        profilePhotoUrl: basic.profilePhotoUrl,
+        panNumberEnc: panEnc,
+        aadhaarNumberEnc: aadhaarEnc,
+        passportNumber: compliance?.passportNumber,
+        passportExpiry: compliance?.passportExpiry,
+        uanNumber: compliance?.uanNumber,
+        esiNumber: compliance?.esicNumber,
+        pfNumber: compliance?.pfNumber,
+        updatedBy: actorUuid,
+      };
+
+      if (newTemporaryPassword) {
+        employeeUpdate.password = await this.passwordService.hashPassword(
+          newTemporaryPassword,
+        );
+        employeeUpdate.mustChangePassword = true;
+        employeeUpdate.passwordChangedAt = null;
+      }
+
       const savedEmployee = await empRepo.save(
-        empRepo.create({
-          ...existingEmployee,
-          organizationId: organizationId ?? existingEmployee.organizationId,
-          name: fullName,
-          email: loginEmail,
-          role,
-          departmentId: employment.departmentId,
-          designationId: employment.designationId,
-          phoneNumber: basic.mobileNumber,
-          dateOfBirth: basic.dateOfBirth,
-          dateOfJoining: employment.dateOfJoining,
-          firstName: basic.firstName,
-          middleName: basic.middleName,
-          lastName: basic.lastName,
-          gender: basic.gender,
-          personalEmail,
-          officialEmail,
-          alternateMobile: basic.alternateMobile,
-          profilePhotoUrl: basic.profilePhotoUrl,
-          panNumberEnc: panEnc,
-          aadhaarNumberEnc: aadhaarEnc,
-          passportNumber: compliance?.passportNumber,
-          passportExpiry: compliance?.passportExpiry,
-          uanNumber: compliance?.uanNumber,
-          esiNumber: compliance?.esicNumber,
-          pfNumber: compliance?.pfNumber,
-          updatedBy: actorUuid,
-        }),
+        empRepo.create(employeeUpdate),
       );
 
       const employmentRepo = em.getRepository(EmployeeEmploymentDetail);
@@ -643,7 +662,10 @@ export class EmployeesService {
           employee: savedEmployee,
           employmentType: employment.employmentType,
           employmentStatus: employment.employmentStatus,
-          hrManagerId: this.optionalUuidField(employment.hrManagerId, 'HR manager'),
+          hrManagerId:
+            employment.hrManagerId !== undefined
+              ? this.optionalUuidField(employment.hrManagerId, 'HR manager')
+              : currentEmployment?.hrManagerId,
           workMode: employment.workMode,
           shift: employment.shift,
           probationPeriodDays: employment.probationPeriodDays,
@@ -717,7 +739,6 @@ export class EmployeesService {
           hrmsAccessEnabled: access?.hrmsAccessEnabled ?? true,
           welcomeEmailEnabled: access?.welcomeEmailEnabled ?? false,
           mfaEnabled: access?.mfaEnabled ?? false,
-          portalRoleLabel: access?.portalRoleLabel,
         }),
       );
 
@@ -814,6 +835,7 @@ export class EmployeesService {
     employee: Employee,
   ): Promise<Record<string, unknown>> {
     const plain = { ...employee } as Record<string, unknown>;
+    delete plain.password;
     const docs = employee.documents as EmployeeDocument[] | undefined;
     plain.documents =
       docs?.map((d) => ({
