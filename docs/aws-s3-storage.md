@@ -58,6 +58,28 @@ On startup, check logs for `AWS S3 configured: bucket=...` (success) or `Missing
 
 See also [`.env.example`](../.env.example) for the full variable list.
 
+### Staging server (`ghoulhr-backend-staging`)
+
+Staging runs a single PM2 app on port **3100** (see [`ecosystem.staging.config.js`](../ecosystem.staging.config.js)). It uses the **same S3 bucket and credentials as production**, synced from the production server `.env` on each deploy ([`deploy_dev_staging.sh`](../../../deploy_dev_staging.sh)).
+
+If uploads return **503** with *"File storage is not configured"*:
+
+1. On the server, merge AWS keys from production into staging `.env`:
+   ```bash
+   bash scripts/patch-staging-storage-env.sh
+   ```
+2. Or re-run staging deploy after confirming production `.env` has `AWS_REGION`, `AWS_BUCKET_NAME`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY`.
+3. Reload PM2 with env:
+   ```bash
+   cd /home/ubuntu/apps/ghoulhrms-staging/ghoulhr-backend
+   pm2 startOrReload ecosystem.staging.config.js --only ghoulhr-backend-staging --update-env
+   ```
+4. Confirm logs: `pm2 logs ghoulhr-backend-staging` → `AWS S3 configured: bucket=...`
+
+Run `bash scripts/verify-staging-auth.sh` on the server — the **Storage env** section should show all AWS keys as `set`.
+
+**Nginx:** add `client_max_body_size 10M;` inside `location /staging/api/v1/` (see [`staging-tenant-nginx.example.conf`](../../../staging-tenant-nginx.example.conf)) or uploads over 1 MB will return **413**.
+
 ## Key layout
 
 ```
