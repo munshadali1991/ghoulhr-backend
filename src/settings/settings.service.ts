@@ -3,6 +3,7 @@ import {
   Logger,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { DataSource, In, IsNull, Not, Repository } from 'typeorm';
 import { OrganizationSetting } from './entities/organization-setting.entity';
@@ -296,35 +297,53 @@ export class SettingsService {
     return { designations };
   }
 
+  /** Postgres unique_violation (23505) → friendly 409 instead of a raw 500. */
+  private rethrowUniqueViolation(error: unknown, message: string): never {
+    const code =
+      (error as { code?: string })?.code ??
+      (error as { driverError?: { code?: string } })?.driverError?.code;
+    if (code === '23505') {
+      throw new ConflictException(message);
+    }
+    throw error;
+  }
+
   async updateDepartments(
     dto: UpdateDepartmentsDto,
     dataSource: DataSource,
     organizationId?: string,
   ): Promise<{ departments: Record<string, unknown>[] }> {
-    await dataSource.transaction(async (em) => {
-      const departmentRepo = em.getRepository(Department);
-      const incomingIds = new Set(dto.departments.map((d) => d.id));
-      const existingDepartments = organizationId
-        ? await departmentRepo.find({ where: { organizationId } })
-        : await departmentRepo.find();
+    try {
+      await dataSource.transaction(async (em) => {
+        const departmentRepo = em.getRepository(Department);
+        const incomingIds = new Set(dto.departments.map((d) => d.id));
+        const existingDepartments = organizationId
+          ? await departmentRepo.find({ where: { organizationId } })
+          : await departmentRepo.find();
 
-      for (const dep of existingDepartments) {
-        if (!incomingIds.has(dep.id)) {
-          await departmentRepo.remove(dep);
+        for (const dep of existingDepartments) {
+          if (!incomingIds.has(dep.id)) {
+            await departmentRepo.remove(dep);
+          }
         }
-      }
-      for (const dep of dto.departments) {
-        await departmentRepo.save(
-          departmentRepo.create({
-            id: dep.id,
-            organizationId,
-            name: dep.name.trim(),
-            code: dep.code?.trim() || null,
-            isActive: dep.isActive,
-          }),
-        );
-      }
-    });
+        for (const dep of dto.departments) {
+          await departmentRepo.save(
+            departmentRepo.create({
+              id: dep.id,
+              organizationId,
+              name: dep.name.trim(),
+              code: dep.code?.trim() || null,
+              isActive: dep.isActive,
+            }),
+          );
+        }
+      });
+    } catch (error) {
+      this.rethrowUniqueViolation(
+        error,
+        'A department with this name or code already exists',
+      );
+    }
 
     await this.setSetting(
       SETTING_KEYS.EMPLOYEE_DEPARTMENTS,
@@ -341,47 +360,55 @@ export class SettingsService {
     dataSource: DataSource,
     organizationId?: string,
   ): Promise<{ designations: Record<string, unknown>[] }> {
-    await dataSource.transaction(async (em) => {
-      const designationRepo = em.getRepository(Designation);
-      const designationDepartmentRepo = em.getRepository(DesignationDepartment);
-      const incomingIds = new Set(dto.designations.map((d) => d.id));
-      const existingDesignations = organizationId
-        ? await designationRepo.find({ where: { organizationId } })
-        : await designationRepo.find();
+    try {
+      await dataSource.transaction(async (em) => {
+        const designationRepo = em.getRepository(Designation);
+        const designationDepartmentRepo =
+          em.getRepository(DesignationDepartment);
+        const incomingIds = new Set(dto.designations.map((d) => d.id));
+        const existingDesignations = organizationId
+          ? await designationRepo.find({ where: { organizationId } })
+          : await designationRepo.find();
 
-      for (const des of existingDesignations) {
-        if (!incomingIds.has(des.id)) {
-          await designationRepo.remove(des);
+        for (const des of existingDesignations) {
+          if (!incomingIds.has(des.id)) {
+            await designationRepo.remove(des);
+          }
         }
-      }
-      for (const des of dto.designations) {
-        await designationRepo.save(
-          designationRepo.create({
-            id: des.id,
-            organizationId,
-            name: des.name.trim(),
-            isActive: des.isActive,
-          }),
-        );
-      }
-
-      if (organizationId) {
-        await designationDepartmentRepo.delete({ organizationId });
-      } else {
-        await designationDepartmentRepo.clear();
-      }
-      for (const des of dto.designations) {
-        for (const depId of des.departmentIds) {
-          await designationDepartmentRepo.save(
-            designationDepartmentRepo.create({
+        for (const des of dto.designations) {
+          await designationRepo.save(
+            designationRepo.create({
+              id: des.id,
               organizationId,
-              designationId: des.id,
-              departmentId: depId,
+              name: des.name.trim(),
+              isActive: des.isActive,
             }),
           );
         }
-      }
-    });
+
+        if (organizationId) {
+          await designationDepartmentRepo.delete({ organizationId });
+        } else {
+          await designationDepartmentRepo.clear();
+        }
+        for (const des of dto.designations) {
+          for (const depId of des.departmentIds) {
+            await designationDepartmentRepo.save(
+              designationDepartmentRepo.create({
+                organizationId,
+                designationId: des.id,
+                departmentId: depId,
+              }),
+            );
+          }
+        }
+      });
+    } catch (error) {
+      this.rethrowUniqueViolation(
+        error,
+        'A designation with this name already exists',
+      );
+    }
 
     await this.setSetting(
       SETTING_KEYS.EMPLOYEE_DESIGNATIONS,
