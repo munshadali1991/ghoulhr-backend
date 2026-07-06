@@ -42,6 +42,16 @@ export function getDefaultAccessScope(
     return AccessScope.SELF;
   }
 
+  if (permissionCode.startsWith('performance.')) {
+    if (roleCode === 'HR_ADMIN' || roleCode === 'ORG_ADMIN') {
+      return AccessScope.ORGANIZATION;
+    }
+    if (roleCode === 'MANAGER' || roleCode === 'TEAM_LEAD') {
+      return AccessScope.TEAM;
+    }
+    return AccessScope.SELF;
+  }
+
   if (permissionCode.startsWith('employees')) {
     if (roleCode === 'HR_ADMIN' || roleCode === 'PAYROLL_ADMIN') {
       return AccessScope.ORGANIZATION;

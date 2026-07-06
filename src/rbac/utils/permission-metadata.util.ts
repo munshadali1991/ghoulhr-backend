@@ -58,6 +58,7 @@ export function permissionResourceLabel(code: string): string {
     'settings.timesheet': 'Timesheet settings',
     'settings.locations': 'Locations',
     'settings.leave': 'Leave settings',
+    'settings.performance': 'Performance settings',
     'ess.leave': 'ESS Leave',
     'ess.attendance': 'ESS Attendance',
     'ess.timesheet': 'ESS Timesheet',
