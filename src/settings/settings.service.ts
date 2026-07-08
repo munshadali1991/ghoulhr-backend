@@ -828,12 +828,36 @@ export class SettingsService {
     }
     await dataSource.transaction(async (em) => {
       const repo = em.getRepository(LocationConfiguration);
+      const wsRepo = em.getRepository(WorkShiftConfiguration);
       const incomingIds = new Set(dto.locations.map((l) => l.id));
       const existing = await repo.find({ where: { organizationId } });
-      for (const row of existing) {
-        if (!incomingIds.has(row.id)) {
-          await repo.remove(row);
+
+      const toDelete = existing.filter((row) => !incomingIds.has(row.id));
+      if (toDelete.length > 0) {
+        const deleteIds = toDelete.map((r) => r.id);
+        const blockingShifts = await wsRepo.find({
+          where: { organizationId, locationId: In(deleteIds) },
+        });
+        if (blockingShifts.length > 0) {
+          const nameById = new Map(toDelete.map((r) => [r.id, r.name]));
+          const grouped = new Map<string, string[]>();
+          for (const s of blockingShifts) {
+            const list = grouped.get(s.locationId) ?? [];
+            list.push(s.name);
+            grouped.set(s.locationId, list);
+          }
+          const parts = [...grouped.entries()].map(([locId, shiftNames]) => {
+            const branch = nameById.get(locId) ?? locId;
+            return `"${branch}": it is used by shift(s) ${shiftNames.map((n) => `"${n}"`).join(', ')}`;
+          });
+          throw new BadRequestException(
+            `Cannot delete branch ${parts.join('; ')}. Reassign or delete those shifts first.`,
+          );
         }
+      }
+
+      for (const row of toDelete) {
+        await repo.remove(row);
       }
       let order = 0;
       for (const item of dto.locations) {
