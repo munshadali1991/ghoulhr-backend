@@ -594,10 +594,10 @@ export class EmployeesService {
 
     const panEnc = compliance?.panNumber?.trim()
       ? this.fieldEncryption.encrypt(compliance.panNumber.toUpperCase().trim())
-      : null;
+      : existingEmployee.panNumberEnc ?? null;
     const aadhaarEnc = compliance?.aadhaarNumber?.trim()
       ? this.fieldEncryption.encrypt(compliance.aadhaarNumber.replace(/\s/g, ''))
-      : null;
+      : existingEmployee.aadhaarNumberEnc ?? null;
 
     const newTemporaryPassword = access?.temporaryPassword?.trim();
     if (newTemporaryPassword) {
@@ -836,6 +836,30 @@ export class EmployeesService {
   ): Promise<Record<string, unknown>> {
     const plain = { ...employee } as Record<string, unknown>;
     delete plain.password;
+    delete plain.panNumberEnc;
+    delete plain.aadhaarNumberEnc;
+
+    const bankDetail = employee.bankDetail as EmployeeBankDetail | undefined;
+    if (bankDetail) {
+      const { accountNumberEnc: _accountNumberEnc, ...safeBank } = bankDetail;
+      plain.bankDetail = safeBank;
+    }
+
+    const panPlain = employee.panNumberEnc
+      ? this.fieldEncryption.decrypt(employee.panNumberEnc)
+      : null;
+    const aadhaarPlain = employee.aadhaarNumberEnc
+      ? this.fieldEncryption.decrypt(employee.aadhaarNumberEnc)
+      : null;
+    plain.complianceSummary = {
+      hasPan: Boolean(employee.panNumberEnc),
+      hasAadhaar: Boolean(employee.aadhaarNumberEnc),
+      panLastFour: panPlain ? this.fieldEncryption.lastFour(panPlain) : null,
+      aadhaarLastFour: aadhaarPlain
+        ? this.fieldEncryption.lastFour(aadhaarPlain)
+        : null,
+    };
+
     const docs = employee.documents as EmployeeDocument[] | undefined;
     plain.documents =
       docs?.map((d) => ({
