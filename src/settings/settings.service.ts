@@ -835,23 +835,36 @@ export class SettingsService {
       const toDelete = existing.filter((row) => !incomingIds.has(row.id));
       if (toDelete.length > 0) {
         const deleteIds = toDelete.map((r) => r.id);
-        const blockingShifts = await wsRepo.find({
-          where: { organizationId, locationId: In(deleteIds) },
-        });
-        if (blockingShifts.length > 0) {
+        const lcRepo = em.getRepository(LeaveConfiguration);
+        const [blockingShifts, blockingLeaves] = await Promise.all([
+          wsRepo.find({ where: { organizationId, locationId: In(deleteIds) } }),
+          lcRepo.find({ where: { organizationId, locationId: In(deleteIds) } }),
+        ]);
+
+        if (blockingShifts.length > 0 || blockingLeaves.length > 0) {
           const nameById = new Map(toDelete.map((r) => [r.id, r.name]));
-          const grouped = new Map<string, string[]>();
-          for (const s of blockingShifts) {
-            const list = grouped.get(s.locationId) ?? [];
-            list.push(s.name);
-            grouped.set(s.locationId, list);
-          }
-          const parts = [...grouped.entries()].map(([locId, shiftNames]) => {
+          const byLoc = new Map<string, { shifts: string[]; leaves: string[] }>();
+          const bucket = (locId: string) => {
+            if (!byLoc.has(locId)) byLoc.set(locId, { shifts: [], leaves: [] });
+            return byLoc.get(locId)!;
+          };
+          for (const s of blockingShifts) bucket(s.locationId).shifts.push(s.name);
+          for (const l of blockingLeaves) bucket(l.locationId).leaves.push(l.name);
+
+          const parts = [...byLoc.entries()].map(([locId, { shifts, leaves }]) => {
             const branch = nameById.get(locId) ?? locId;
-            return `"${branch}": it is used by shift(s) ${shiftNames.map((n) => `"${n}"`).join(', ')}`;
+            const used: string[] = [];
+            if (shifts.length) {
+              used.push(`shift(s) ${shifts.map((n) => `"${n}"`).join(', ')}`);
+            }
+            if (leaves.length) {
+              used.push(`leave type(s) ${leaves.map((n) => `"${n}"`).join(', ')}`);
+            }
+            return `"${branch}": it is used by ${used.join(' and ')}`;
           });
+
           throw new BadRequestException(
-            `Cannot delete branch ${parts.join('; ')}. Reassign or delete those shifts first.`,
+            `Cannot delete branch ${parts.join('; ')}. Reassign or delete those first.`,
           );
         }
       }
