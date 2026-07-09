@@ -52,6 +52,12 @@ export class EmployeeScopeService {
 
   ): Promise<string[] | null> {
 
+    if (resolved.roleCodes.some((r) => FULL_ROSTER_ROLES.has(r))) {
+
+      return null;
+
+    }
+
     if (this.rbacConfig.isScopeV2Enabled()) {
 
       const scope =
@@ -69,8 +75,6 @@ export class EmployeeScopeService {
       );
 
     }
-
-
 
     return this.getVisibleEmployeeIdsLegacy(
 

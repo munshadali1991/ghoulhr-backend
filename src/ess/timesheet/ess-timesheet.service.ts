@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DataSource, Between, EntityManager, IsNull } from 'typeorm';
+import { DataSource, Between, EntityManager, In, IsNull } from 'typeorm';
 import { Employee } from '../../employees/employee.entity';
 import { Department } from '../../employees/entities/department.entity';
 import { Designation } from '../../employees/entities/designation.entity';
@@ -571,7 +571,13 @@ export class EssTimesheetService {
     const employeeQb = dataSource
       .getRepository(Employee)
       .createQueryBuilder('e')
-      .where('e.organizationId = :organizationId', { organizationId });
+      .where(
+        `(e.organizationId = :organizationId OR e.organizationId IS NULL OR EXISTS (
+          SELECT 1 FROM timesheet_days d
+          WHERE d."employeeId" = e.id AND d."organizationId" = :organizationId
+        ))`,
+        { organizationId },
+      );
 
     if (visibleIds) {
       employeeQb.andWhere('e.id IN (:...visibleIds)', { visibleIds });
@@ -580,7 +586,7 @@ export class EssTimesheetService {
       employeeQb.andWhere('e.id = :employeeId', { employeeId: query.employeeId });
     }
 
-    const employees = await employeeQb.orderBy('e.name', 'ASC').getMany();
+    let employees = await employeeQb.orderBy('e.name', 'ASC').getMany();
 
     const dayQb = dataSource
       .getRepository(TimesheetDay)
@@ -600,9 +606,34 @@ export class EssTimesheetService {
     }
 
     const existingDays = await dayQb.getMany();
+
+    const employeeById = new Map(employees.map((e) => [e.id, e]));
+    const missingEmployeeIds = [
+      ...new Set(
+        existingDays
+          .map((d) => d.employeeId)
+          .filter((id) => !employeeById.has(id)),
+      ),
+    ];
+    if (missingEmployeeIds.length > 0) {
+      const extras = await dataSource.getRepository(Employee).find({
+        where: { id: In(missingEmployeeIds) },
+      });
+      for (const emp of extras) {
+        employeeById.set(emp.id, emp);
+      }
+      employees = [...employeeById.values()].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      );
+    }
+
     const dayByKey = new Map<string, TimesheetDay>();
     for (const day of existingDays) {
-      dayByKey.set(`${day.employeeId}:${day.workDate}`, day);
+      const workDateKey =
+        typeof day.workDate === 'string'
+          ? day.workDate.slice(0, 10)
+          : formatDateKey(day.workDate as unknown as Date);
+      dayByKey.set(`${day.employeeId}:${workDateKey}`, day);
     }
 
     const today = formatDateKey(new Date());
@@ -658,7 +689,7 @@ export class EssTimesheetService {
 
         allRows.push({
           id: day.id,
-          workDate: day.workDate,
+          workDate: workDate,
           status: displayStatus,
           totalHours: hours,
           entryCount: day.entries?.length ?? 0,
