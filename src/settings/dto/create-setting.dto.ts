@@ -349,6 +349,11 @@ export class ShiftDto {
   @ValidateNested({ each: true })
   @Type(() => ShiftSessionDto)
   sessions?: ShiftSessionDto[];
+
+  @ApiProperty({ example: true, required: false, default: true })
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 }
 
 export class UpdateAttendanceSettingsDto {

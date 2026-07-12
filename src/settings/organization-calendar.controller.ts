@@ -18,6 +18,7 @@ import { PermissionsGuard } from '../rbac/guards/permissions.guard';
 import { RequirePermissions } from '../rbac/decorators/require-permissions.decorator';
 import type { TenantRequest } from '../common/middleware/tenant-resolver.middleware';
 import {
+  BulkUpsertCalendarHolidaysDto,
   CreateCalendarHolidayDto,
   GetOrganizationCalendarQueryDto,
   PublishOrganizationCalendarDto,
@@ -56,6 +57,22 @@ export class OrganizationCalendarController {
     @Body() dto: CreateCalendarHolidayDto,
   ) {
     return this.organizationCalendarService.createHoliday(
+      req.tenantDataSource!,
+      req.organization!.id,
+      dto,
+    );
+  }
+
+  @Post('holidays/bulk')
+  @RequirePermissions('settings.organization:write')
+  @ApiOperation({
+    summary: 'Bulk create or overwrite holidays for a calendar year',
+  })
+  bulkUpsertHolidays(
+    @Req() req: TenantRequest,
+    @Body() dto: BulkUpsertCalendarHolidaysDto,
+  ) {
+    return this.organizationCalendarService.bulkUpsertHolidays(
       req.tenantDataSource!,
       req.organization!.id,
       dto,

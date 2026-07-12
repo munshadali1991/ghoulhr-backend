@@ -14,6 +14,7 @@ import {
   OrganizationCalendarStatus,
 } from './entities/organization-calendar.entity';
 import {
+  BulkUpsertCalendarHolidaysDto,
   CreateCalendarHolidayDto,
   UpdateCalendarHolidayDto,
 } from './dto/organization-calendar.dto';
@@ -187,6 +188,203 @@ export class OrganizationCalendarService {
         status: calendar.status,
       },
     };
+  }
+
+  async bulkUpsertHolidays(
+    dataSource: DataSource,
+    organizationId: string,
+    dto: BulkUpsertCalendarHolidaysDto,
+  ) {
+    if (!dto.holidays?.length) {
+      throw new BadRequestException('At least one holiday is required');
+    }
+    if (dto.holidays.length > 500) {
+      throw new BadRequestException('A maximum of 500 holidays can be imported at once');
+    }
+
+    const rowErrors: Array<{ index: number; message: string }> = [];
+    const locationIds = [
+      ...new Set(
+        dto.holidays
+          .map((h) => h.locationId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+
+    if (locationIds.length > 0) {
+      const locations = await dataSource
+        .getRepository(LocationConfiguration)
+        .find({ where: { id: In(locationIds), organizationId } });
+      const found = new Set(locations.map((l) => l.id));
+      for (let i = 0; i < dto.holidays.length; i += 1) {
+        const locId = dto.holidays[i].locationId;
+        if (locId && !found.has(locId)) {
+          rowErrors.push({ index: i, message: 'Location not found' });
+        }
+      }
+    }
+
+    /** Last row wins for same date+location within the payload */
+    const deduped = new Map<
+      string,
+      { index: number; item: (typeof dto.holidays)[number] }
+    >();
+
+    for (let i = 0; i < dto.holidays.length; i += 1) {
+      const item = dto.holidays[i];
+      const holidayDate = this.normalizeDateString(item.holidayDate);
+      if (!holidayDate) {
+        rowErrors.push({ index: i, message: 'Invalid holiday date' });
+        continue;
+      }
+      const holidayYear = Number(holidayDate.slice(0, 4));
+      if (holidayYear !== dto.year) {
+        rowErrors.push({
+          index: i,
+          message: 'Holiday date must fall within the selected calendar year',
+        });
+        continue;
+      }
+      const name = item.name?.trim();
+      if (!name) {
+        rowErrors.push({ index: i, message: 'Holiday name is required' });
+        continue;
+      }
+      if (name.length > 191) {
+        rowErrors.push({
+          index: i,
+          message: 'Holiday name must be at most 191 characters',
+        });
+        continue;
+      }
+      if (
+        item.holidayType !== CalendarHolidayType.GENERAL &&
+        item.holidayType !== CalendarHolidayType.RESTRICTED
+      ) {
+        rowErrors.push({
+          index: i,
+          message: 'Holiday type must be GENERAL or RESTRICTED',
+        });
+        continue;
+      }
+
+      const key = this.holidayMatchKey(holidayDate, item.locationId ?? null);
+      deduped.set(key, {
+        index: i,
+        item: {
+          ...item,
+          holidayDate,
+          name,
+          locationId: item.locationId ?? null,
+        },
+      });
+    }
+
+    if (rowErrors.length > 0) {
+      throw new BadRequestException({
+        message: 'Holiday import validation failed',
+        errors: rowErrors,
+      });
+    }
+
+    const calendar = await this.getOrCreateCalendar(
+      dataSource,
+      organizationId,
+      dto.year,
+    );
+
+    const result = await dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(OrganizationCalendarHoliday);
+      const existing = await repo.find({
+        where: { calendarId: calendar.id, organizationId },
+      });
+
+      const existingByKey = new Map<string, OrganizationCalendarHoliday>();
+      for (const row of existing) {
+        const date = this.normalizeDateString(row.holidayDate);
+        if (!date) continue;
+        existingByKey.set(
+          this.holidayMatchKey(date, row.locationId ?? null),
+          row,
+        );
+      }
+
+      let created = 0;
+      let updated = 0;
+      const overwrites: Array<{
+        holidayDate: string;
+        name: string;
+        previousName: string;
+      }> = [];
+
+      for (const { item } of deduped.values()) {
+        const key = this.holidayMatchKey(
+          item.holidayDate,
+          item.locationId ?? null,
+        );
+        const current = existingByKey.get(key);
+        if (current) {
+          const previousName = current.name;
+          current.name = item.name;
+          current.holidayType = item.holidayType;
+          current.holidayDate = item.holidayDate;
+          current.locationId = item.locationId ?? null;
+          await repo.save(current);
+          updated += 1;
+          overwrites.push({
+            holidayDate: item.holidayDate,
+            name: item.name,
+            previousName,
+          });
+        } else {
+          const saved = await repo.save(
+            repo.create({
+              organizationId,
+              calendarId: calendar.id,
+              locationId: item.locationId ?? null,
+              holidayDate: item.holidayDate,
+              name: item.name,
+              holidayType: item.holidayType,
+            }),
+          );
+          existingByKey.set(key, saved);
+          created += 1;
+        }
+      }
+
+      return { created, updated, overwrites };
+    });
+
+    return {
+      created: result.created,
+      updated: result.updated,
+      overwrites: result.overwrites,
+      message: `Imported ${result.created + result.updated} holidays (${result.created} created, ${result.updated} updated)`,
+    };
+  }
+
+  private holidayMatchKey(
+    holidayDate: string,
+    locationId: string | null,
+  ): string {
+    return `${holidayDate}|${locationId ?? ''}`;
+  }
+
+  private normalizeDateString(
+    value: string | Date | null | undefined,
+  ): string | null {
+    if (value == null) return null;
+    if (value instanceof Date) {
+      if (Number.isNaN(value.getTime())) return null;
+      return value.toISOString().slice(0, 10);
+    }
+    const raw = String(value).trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
+      return raw.slice(0, 10);
+    }
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toISOString().slice(0, 10);
   }
 
   private async getOrCreateCalendar(

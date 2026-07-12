@@ -519,6 +519,7 @@ export class SettingsService {
         start_time: s.startTime,
         end_time: s.endTime,
       })),
+      isActive: row.isActive !== false,
       createdAt,
       updatedAt: readRowTimestamp(raw, 'updatedAt'),
     };
@@ -601,6 +602,7 @@ export class SettingsService {
             endTime: String(item.end_time ?? '18:00'),
             breakMinutes: Number(item.break_minutes ?? 0),
             sortOrder: order++,
+            isActive: item.isActive !== false,
           }),
         );
       }
@@ -745,6 +747,7 @@ export class SettingsService {
             endTime: s.end_time,
             breakMinutes: s.break_minutes ?? 0,
             sortOrder: order++,
+            isActive: s.isActive !== false,
           };
 
           const existingRow =
