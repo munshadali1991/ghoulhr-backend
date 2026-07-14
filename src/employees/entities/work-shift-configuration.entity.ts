@@ -31,4 +31,7 @@ export class WorkShiftConfiguration extends BaseEntity {
 
   @Column({ type: 'int', default: 0 })
   sortOrder: number;
+
+  @Column({ type: 'boolean', default: true })
+  isActive: boolean;
 }

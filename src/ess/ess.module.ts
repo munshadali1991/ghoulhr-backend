@@ -23,6 +23,10 @@ import { EssNotificationsService } from './notifications/ess-notifications.servi
 import { EssTimesheetController } from './timesheet/ess-timesheet.controller';
 import { EssTimesheetService } from './timesheet/ess-timesheet.service';
 import { EssApprovalsController } from './approvals/ess-approvals.controller';
+import { EssPerformanceController } from './performance/ess-performance.controller';
+import { EssPerformanceService } from './performance/ess-performance.service';
+import { PerformanceMasterController } from './performance/performance-master.controller';
+import { PerformanceMasterService } from './performance/performance-master.service';
 
 @Module({
   imports: [EmployeesModule, SettingsModule, EmailModule],
@@ -35,6 +39,8 @@ import { EssApprovalsController } from './approvals/ess-approvals.controller';
     EssNotificationsController,
     EssTimesheetController,
     EssApprovalsController,
+    EssPerformanceController,
+    PerformanceMasterController,
   ],
   providers: [
     EssLeaveService,
@@ -44,6 +50,8 @@ import { EssApprovalsController } from './approvals/ess-approvals.controller';
     EssHomeService,
     EssNotificationsService,
     EssTimesheetService,
+    EssPerformanceService,
+    PerformanceMasterService,
     LeavePolicyService,
     LeaveBalanceService,
     LeaveDayCalculatorService,

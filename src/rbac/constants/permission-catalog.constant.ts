@@ -47,6 +47,8 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   perm('settings.locations:write', 'write', 'Update location configurations'),
   perm('settings.leave:read', 'read', 'View leave configurations'),
   perm('settings.leave:write', 'write', 'Update leave configurations'),
+  perm('settings.performance:read', 'read', 'View performance assessment master'),
+  perm('settings.performance:write', 'write', 'Update performance assessment master'),
 
   // ESS
   perm('ess.leave:read', 'read', 'View own leave data'),
@@ -55,12 +57,20 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   perm('ess.attendance:punch', 'punch', 'Sign in/out attendance'),
   perm('ess.timesheet:read', 'read', 'View own timesheet'),
   perm('ess.timesheet:write', 'write', 'Edit own timesheet entries'),
+  perm('ess.performance:read', 'read', 'View own performance assessments'),
+  perm('ess.performance:write', 'write', 'Complete own self-assessment'),
 
   // Approvals
   perm('approvals.leave:read', 'read', 'View leave requests pending approval'),
   perm('approvals.leave:act', 'act', 'Approve or reject leave requests'),
   perm('approvals.timesheet:read', 'read', 'View timesheets pending approval'),
   perm('approvals.timesheet:act', 'act', 'Approve or reject timesheets'),
+
+  // Performance (Manager & HR review)
+  perm('performance.review:read', 'read', 'View team performance assessments'),
+  perm('performance.review:act', 'act', 'Complete manager performance review'),
+  perm('performance.hr:read', 'read', 'View performance assessments for HR review'),
+  perm('performance.hr:act', 'act', 'Complete HR performance feedback'),
 
   // Payroll
   perm('payroll:read', 'read', 'View payroll data'),
@@ -96,6 +106,8 @@ const ESS_PERMISSIONS = [
   'ess.attendance:punch',
   'ess.timesheet:read',
   'ess.timesheet:write',
+  'ess.performance:read',
+  'ess.performance:write',
   'dashboard.ess:read',
 ];
 
@@ -107,6 +119,8 @@ const MANAGER_PERMISSIONS = [
   'approvals.leave:act',
   'approvals.timesheet:read',
   'approvals.timesheet:act',
+  'performance.review:read',
+  'performance.review:act',
   'dashboard.manager:read',
   'dashboard.approvals:read',
 ];
@@ -118,6 +132,8 @@ const HR_ADMIN_PERMISSIONS = [
   'employees:onboard',
   'employees:reset-password',
   'employees:reporting-manager:assign',
+  'performance.hr:read',
+  'performance.hr:act',
   'dashboard.hr:read',
   'settings.employees:read',
   'settings.employees:write',
@@ -130,6 +146,8 @@ const HR_ADMIN_PERMISSIONS = [
   'settings.locations:write',
   'settings.leave:read',
   'settings.leave:write',
+  'settings.performance:read',
+  'settings.performance:write',
   'settings.attendance:read',
   'settings.attendance:write',
 ];

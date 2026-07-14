@@ -3,6 +3,7 @@ import {
   Logger,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { DataSource, In, IsNull, Not, Repository } from 'typeorm';
 import { OrganizationSetting } from './entities/organization-setting.entity';
@@ -296,35 +297,53 @@ export class SettingsService {
     return { designations };
   }
 
+  /** Postgres unique_violation (23505) → friendly 409 instead of a raw 500. */
+  private rethrowUniqueViolation(error: unknown, message: string): never {
+    const code =
+      (error as { code?: string })?.code ??
+      (error as { driverError?: { code?: string } })?.driverError?.code;
+    if (code === '23505') {
+      throw new ConflictException(message);
+    }
+    throw error;
+  }
+
   async updateDepartments(
     dto: UpdateDepartmentsDto,
     dataSource: DataSource,
     organizationId?: string,
   ): Promise<{ departments: Record<string, unknown>[] }> {
-    await dataSource.transaction(async (em) => {
-      const departmentRepo = em.getRepository(Department);
-      const incomingIds = new Set(dto.departments.map((d) => d.id));
-      const existingDepartments = organizationId
-        ? await departmentRepo.find({ where: { organizationId } })
-        : await departmentRepo.find();
+    try {
+      await dataSource.transaction(async (em) => {
+        const departmentRepo = em.getRepository(Department);
+        const incomingIds = new Set(dto.departments.map((d) => d.id));
+        const existingDepartments = organizationId
+          ? await departmentRepo.find({ where: { organizationId } })
+          : await departmentRepo.find();
 
-      for (const dep of existingDepartments) {
-        if (!incomingIds.has(dep.id)) {
-          await departmentRepo.remove(dep);
+        for (const dep of existingDepartments) {
+          if (!incomingIds.has(dep.id)) {
+            await departmentRepo.remove(dep);
+          }
         }
-      }
-      for (const dep of dto.departments) {
-        await departmentRepo.save(
-          departmentRepo.create({
-            id: dep.id,
-            organizationId,
-            name: dep.name.trim(),
-            code: dep.code?.trim() || null,
-            isActive: dep.isActive,
-          }),
-        );
-      }
-    });
+        for (const dep of dto.departments) {
+          await departmentRepo.save(
+            departmentRepo.create({
+              id: dep.id,
+              organizationId,
+              name: dep.name.trim(),
+              code: dep.code?.trim() || null,
+              isActive: dep.isActive,
+            }),
+          );
+        }
+      });
+    } catch (error) {
+      this.rethrowUniqueViolation(
+        error,
+        'A department with this name or code already exists',
+      );
+    }
 
     await this.setSetting(
       SETTING_KEYS.EMPLOYEE_DEPARTMENTS,
@@ -341,47 +360,55 @@ export class SettingsService {
     dataSource: DataSource,
     organizationId?: string,
   ): Promise<{ designations: Record<string, unknown>[] }> {
-    await dataSource.transaction(async (em) => {
-      const designationRepo = em.getRepository(Designation);
-      const designationDepartmentRepo = em.getRepository(DesignationDepartment);
-      const incomingIds = new Set(dto.designations.map((d) => d.id));
-      const existingDesignations = organizationId
-        ? await designationRepo.find({ where: { organizationId } })
-        : await designationRepo.find();
+    try {
+      await dataSource.transaction(async (em) => {
+        const designationRepo = em.getRepository(Designation);
+        const designationDepartmentRepo =
+          em.getRepository(DesignationDepartment);
+        const incomingIds = new Set(dto.designations.map((d) => d.id));
+        const existingDesignations = organizationId
+          ? await designationRepo.find({ where: { organizationId } })
+          : await designationRepo.find();
 
-      for (const des of existingDesignations) {
-        if (!incomingIds.has(des.id)) {
-          await designationRepo.remove(des);
+        for (const des of existingDesignations) {
+          if (!incomingIds.has(des.id)) {
+            await designationRepo.remove(des);
+          }
         }
-      }
-      for (const des of dto.designations) {
-        await designationRepo.save(
-          designationRepo.create({
-            id: des.id,
-            organizationId,
-            name: des.name.trim(),
-            isActive: des.isActive,
-          }),
-        );
-      }
-
-      if (organizationId) {
-        await designationDepartmentRepo.delete({ organizationId });
-      } else {
-        await designationDepartmentRepo.clear();
-      }
-      for (const des of dto.designations) {
-        for (const depId of des.departmentIds) {
-          await designationDepartmentRepo.save(
-            designationDepartmentRepo.create({
+        for (const des of dto.designations) {
+          await designationRepo.save(
+            designationRepo.create({
+              id: des.id,
               organizationId,
-              designationId: des.id,
-              departmentId: depId,
+              name: des.name.trim(),
+              isActive: des.isActive,
             }),
           );
         }
-      }
-    });
+
+        if (organizationId) {
+          await designationDepartmentRepo.delete({ organizationId });
+        } else {
+          await designationDepartmentRepo.clear();
+        }
+        for (const des of dto.designations) {
+          for (const depId of des.departmentIds) {
+            await designationDepartmentRepo.save(
+              designationDepartmentRepo.create({
+                organizationId,
+                designationId: des.id,
+                departmentId: depId,
+              }),
+            );
+          }
+        }
+      });
+    } catch (error) {
+      this.rethrowUniqueViolation(
+        error,
+        'A designation with this name already exists',
+      );
+    }
 
     await this.setSetting(
       SETTING_KEYS.EMPLOYEE_DESIGNATIONS,
@@ -492,6 +519,7 @@ export class SettingsService {
         start_time: s.startTime,
         end_time: s.endTime,
       })),
+      isActive: row.isActive !== false,
       createdAt,
       updatedAt: readRowTimestamp(raw, 'updatedAt'),
     };
@@ -574,6 +602,7 @@ export class SettingsService {
             endTime: String(item.end_time ?? '18:00'),
             breakMinutes: Number(item.break_minutes ?? 0),
             sortOrder: order++,
+            isActive: item.isActive !== false,
           }),
         );
       }
@@ -718,6 +747,7 @@ export class SettingsService {
             endTime: s.end_time,
             breakMinutes: s.break_minutes ?? 0,
             sortOrder: order++,
+            isActive: s.isActive !== false,
           };
 
           const existingRow =
@@ -801,12 +831,49 @@ export class SettingsService {
     }
     await dataSource.transaction(async (em) => {
       const repo = em.getRepository(LocationConfiguration);
+      const wsRepo = em.getRepository(WorkShiftConfiguration);
       const incomingIds = new Set(dto.locations.map((l) => l.id));
       const existing = await repo.find({ where: { organizationId } });
-      for (const row of existing) {
-        if (!incomingIds.has(row.id)) {
-          await repo.remove(row);
+
+      const toDelete = existing.filter((row) => !incomingIds.has(row.id));
+      if (toDelete.length > 0) {
+        const deleteIds = toDelete.map((r) => r.id);
+        const lcRepo = em.getRepository(LeaveConfiguration);
+        const [blockingShifts, blockingLeaves] = await Promise.all([
+          wsRepo.find({ where: { organizationId, locationId: In(deleteIds) } }),
+          lcRepo.find({ where: { organizationId, locationId: In(deleteIds) } }),
+        ]);
+
+        if (blockingShifts.length > 0 || blockingLeaves.length > 0) {
+          const nameById = new Map(toDelete.map((r) => [r.id, r.name]));
+          const byLoc = new Map<string, { shifts: string[]; leaves: string[] }>();
+          const bucket = (locId: string) => {
+            if (!byLoc.has(locId)) byLoc.set(locId, { shifts: [], leaves: [] });
+            return byLoc.get(locId)!;
+          };
+          for (const s of blockingShifts) bucket(s.locationId).shifts.push(s.name);
+          for (const l of blockingLeaves) bucket(l.locationId).leaves.push(l.name);
+
+          const parts = [...byLoc.entries()].map(([locId, { shifts, leaves }]) => {
+            const branch = nameById.get(locId) ?? locId;
+            const used: string[] = [];
+            if (shifts.length) {
+              used.push(`shift(s) ${shifts.map((n) => `"${n}"`).join(', ')}`);
+            }
+            if (leaves.length) {
+              used.push(`leave type(s) ${leaves.map((n) => `"${n}"`).join(', ')}`);
+            }
+            return `"${branch}": it is used by ${used.join(' and ')}`;
+          });
+
+          throw new BadRequestException(
+            `Cannot delete branch ${parts.join('; ')}. Reassign or delete those first.`,
+          );
         }
+      }
+
+      for (const row of toDelete) {
+        await repo.remove(row);
       }
       let order = 0;
       for (const item of dto.locations) {

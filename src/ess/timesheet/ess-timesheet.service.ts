@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DataSource, Between, EntityManager, IsNull } from 'typeorm';
+import { DataSource, Between, EntityManager, In, IsNull } from 'typeorm';
 import { Employee } from '../../employees/employee.entity';
 import { Department } from '../../employees/entities/department.entity';
 import { Designation } from '../../employees/entities/designation.entity';
@@ -20,6 +20,8 @@ import {
 } from './timesheet.constants';
 import { TimesheetEntryDto } from './dto/timesheet-entry.dto';
 import { UpsertTimesheetDayDto } from './dto/upsert-timesheet-day.dto';
+import { TimesheetReportQueryDto } from './dto/timesheet-report-query.dto';
+import { TimesheetEntryReportQueryDto } from './dto/timesheet-entry-report-query.dto';
 import { TeamTimesheetQueryDto } from './dto/team-timesheet-query.dto';
 import { BulkApproveTimesheetDto } from '../approvals/dto/bulk-approve-timesheet.dto';
 import { EssAttendanceService } from '../attendance/ess-attendance.service';
@@ -571,7 +573,13 @@ export class EssTimesheetService {
     const employeeQb = dataSource
       .getRepository(Employee)
       .createQueryBuilder('e')
-      .where('e.organizationId = :organizationId', { organizationId });
+      .where(
+        `(e.organizationId = :organizationId OR e.organizationId IS NULL OR EXISTS (
+          SELECT 1 FROM timesheet_days d
+          WHERE d."employeeId" = e.id AND d."organizationId" = :organizationId
+        ))`,
+        { organizationId },
+      );
 
     if (visibleIds) {
       employeeQb.andWhere('e.id IN (:...visibleIds)', { visibleIds });
@@ -580,7 +588,7 @@ export class EssTimesheetService {
       employeeQb.andWhere('e.id = :employeeId', { employeeId: query.employeeId });
     }
 
-    const employees = await employeeQb.orderBy('e.name', 'ASC').getMany();
+    let employees = await employeeQb.orderBy('e.name', 'ASC').getMany();
 
     const dayQb = dataSource
       .getRepository(TimesheetDay)
@@ -600,9 +608,34 @@ export class EssTimesheetService {
     }
 
     const existingDays = await dayQb.getMany();
+
+    const employeeById = new Map(employees.map((e) => [e.id, e]));
+    const missingEmployeeIds = [
+      ...new Set(
+        existingDays
+          .map((d) => d.employeeId)
+          .filter((id) => !employeeById.has(id)),
+      ),
+    ];
+    if (missingEmployeeIds.length > 0) {
+      const extras = await dataSource.getRepository(Employee).find({
+        where: { id: In(missingEmployeeIds) },
+      });
+      for (const emp of extras) {
+        employeeById.set(emp.id, emp);
+      }
+      employees = [...employeeById.values()].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      );
+    }
+
     const dayByKey = new Map<string, TimesheetDay>();
     for (const day of existingDays) {
-      dayByKey.set(`${day.employeeId}:${day.workDate}`, day);
+      const workDateKey =
+        typeof day.workDate === 'string'
+          ? day.workDate.slice(0, 10)
+          : formatDateKey(day.workDate as unknown as Date);
+      dayByKey.set(`${day.employeeId}:${workDateKey}`, day);
     }
 
     const today = formatDateKey(new Date());
@@ -658,7 +691,7 @@ export class EssTimesheetService {
 
         allRows.push({
           id: day.id,
-          workDate: day.workDate,
+          workDate: workDate,
           status: displayStatus,
           totalHours: hours,
           entryCount: day.entries?.length ?? 0,
@@ -1024,5 +1057,148 @@ export class EssTimesheetService {
         entries,
       });
     }
+  }
+
+  async getReports(
+    dataSource: DataSource,
+    organizationId: string,
+    employeeId: string,
+    query: TimesheetReportQueryDto,
+  ) {
+    const settings = await this.resolveSettings(dataSource);
+    const repo = dataSource.getRepository(TimesheetDay);
+    const days = await repo.find({
+      where: {
+        organizationId,
+        employeeId,
+        workDate: Between(query.from, query.to),
+      },
+      order: { workDate: 'ASC' },
+    });
+
+    const dayRows = days.map((d) => ({
+      workDate: d.workDate,
+      totalHours: Number(d.totalHours),
+      status: d.status,
+      entryCount: 0,
+    }));
+
+    const totalHours = dayRows.reduce((acc, d) => acc + d.totalHours, 0);
+    const statusSummary: Record<string, number> = {};
+    for (const d of dayRows) {
+      const key = d.status ?? 'MISSING';
+      statusSummary[key] = (statusSummary[key] ?? 0) + 1;
+    }
+
+    let series: { label: string; totalHours: number; days: typeof dayRows }[] =
+      [];
+
+    if (query.granularity === 'daily') {
+      series = dayRows.map((d) => ({
+        label: d.workDate,
+        totalHours: d.totalHours,
+        days: [d],
+      }));
+    } else if (query.granularity === 'weekly') {
+      const buckets = new Map<string, typeof dayRows>();
+      for (const row of dayRows) {
+        const d = parseDateKey(row.workDate);
+        const dayOfWeek = d.getDay();
+        const diff = (dayOfWeek - settings.weekStartsOn + 7) % 7;
+        const weekStart = addDays(row.workDate, -diff);
+        const bucket = buckets.get(weekStart) ?? [];
+        bucket.push(row);
+        buckets.set(weekStart, bucket);
+      }
+      series = [...buckets.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([weekStart, rows]) => ({
+          label: weekStart,
+          totalHours: rows.reduce((acc, r) => acc + r.totalHours, 0),
+          days: rows,
+        }));
+    } else {
+      const buckets = new Map<string, typeof dayRows>();
+      for (const row of dayRows) {
+        const monthKey = row.workDate.slice(0, 7);
+        const bucket = buckets.get(monthKey) ?? [];
+        bucket.push(row);
+        buckets.set(monthKey, bucket);
+      }
+      series = [...buckets.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([monthKey, rows]) => ({
+          label: monthKey,
+          totalHours: rows.reduce((acc, r) => acc + r.totalHours, 0),
+          days: rows,
+        }));
+    }
+
+    return {
+      from: query.from,
+      to: query.to,
+      granularity: query.granularity,
+      totalHours,
+      statusSummary,
+      days: dayRows,
+      series,
+      settings: {
+        maxHoursPerDay: settings.maxHoursPerDay,
+        weekStartsOn: settings.weekStartsOn,
+      },
+    };
+  }
+
+  async getReportEntries(
+    dataSource: DataSource,
+    organizationId: string,
+    employeeId: string,
+    query: TimesheetEntryReportQueryDto,
+  ) {
+    if (query.from > query.to) {
+      throw new BadRequestException('"from" must be on or before "to".');
+    }
+
+    const repo = dataSource.getRepository(TimesheetDay);
+    const days = await repo.find({
+      where: {
+        organizationId,
+        employeeId,
+        workDate: Between(query.from, query.to),
+      },
+      relations: ['entries', 'entries.category'],
+      order: { workDate: 'DESC' },
+    });
+
+    const rows: {
+      workDate: string;
+      dayStatus: string;
+      editable: boolean;
+      canReopen: boolean;
+      entry: ReturnType<typeof this.mapEntryToApi>;
+    }[] = [];
+
+    for (const day of days) {
+      const sorted = (day.entries ?? [])
+        .slice()
+        .sort((a, b) => a.sortOrder - b.sortOrder);
+      for (const entry of sorted) {
+        rows.push({
+          workDate: day.workDate,
+          dayStatus: day.status,
+          editable: TIMESHEET_EDITABLE_STATUSES.includes(day.status),
+          canReopen: day.status === TimesheetDayStatus.SUBMITTED,
+          entry: this.mapEntryToApi(entry),
+        });
+      }
+    }
+
+    return {
+      from: query.from,
+      to: query.to,
+      totalEntries: rows.length,
+      totalHours: rows.reduce((acc, r) => acc + r.entry.hoursSpent, 0),
+      rows,
+    };
   }
 }
