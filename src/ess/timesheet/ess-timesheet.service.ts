@@ -174,6 +174,31 @@ export class EssTimesheetService {
     };
   }
 
+  private async getLastFilledDate(
+    dataSource: DataSource,
+    organizationId: string,
+    employeeId: string,
+  ): Promise<string | null> {
+    const day = await dataSource
+      .getRepository(TimesheetDay)
+      .createQueryBuilder('d')
+      .where('d.organizationId = :organizationId', { organizationId })
+      .andWhere('d.employeeId = :employeeId', { employeeId })
+      .andWhere('d.status = :status', {
+        status: TimesheetDayStatus.SUBMITTED,
+      })
+      .orderBy('d.workDate', 'DESC')
+      .getOne();
+
+    if (!day) {
+      return null;
+    }
+
+    return typeof day.workDate === 'string'
+      ? day.workDate.slice(0, 10)
+      : formatDateKey(day.workDate as unknown as Date);
+  }
+
   async getDay(
     dataSource: DataSource,
     organizationId: string,
@@ -187,6 +212,12 @@ export class EssTimesheetService {
       relations: ['entries', 'entries.category'],
     });
 
+    const lastFilledDate = await this.getLastFilledDate(
+      dataSource,
+      organizationId,
+      employeeId,
+    );
+
     if (!day) {
       return {
         id: null,
@@ -196,6 +227,7 @@ export class EssTimesheetService {
         entries: [],
         editable: true,
         isMissing: true,
+        lastFilledDate,
         settings: {
           maxHoursPerDay: settings.maxHoursPerDay,
           maxPastDays: settings.maxPastDays,
@@ -204,7 +236,7 @@ export class EssTimesheetService {
       };
     }
 
-    return { ...this.mapDayToApi(day, settings), isMissing: false };
+    return { ...this.mapDayToApi(day, settings), isMissing: false, lastFilledDate };
   }
 
   async upsertDay(
