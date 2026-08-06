@@ -10,6 +10,8 @@ import { EmployeesModule } from '../employees/employees.module';
 import { OrganizationRuntimeBootstrapService } from './organization-runtime-bootstrap.service';
 import { TenantSslProvisioningService } from './tenant-ssl-provisioning.service';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
+import { PasswordService } from '../common/services/password.service';
+import { EmailModule } from '../modules/email';
 
 @Module({
   imports: [
@@ -18,11 +20,13 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
     DatabaseCoreModule,
     EmployeesModule,
     forwardRef(() => SubscriptionsModule),
+    EmailModule,
   ],
   providers: [
     OrganizationsService,
     OrganizationRuntimeBootstrapService,
     TenantSslProvisioningService,
+    PasswordService,
   ],
   controllers: [OrganizationsController],
   exports: [OrganizationsService],

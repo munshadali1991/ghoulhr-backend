@@ -1394,6 +1394,23 @@ export class EmployeesService {
     employeeId: string,
     dataSource: DataSource,
   ): Promise<{ temporaryPassword: string; expiresAt: Date }> {
+    const temporaryPassword = this.passwordService.generateTemporaryPassword();
+    const expiresAt = await this.forceSetTemporaryPassword(
+      employeeId,
+      temporaryPassword,
+      dataSource,
+    );
+    return { temporaryPassword, expiresAt };
+  }
+
+  /**
+   * Force-set a known temporary password (used when syncing master + tenant hashes).
+   */
+  async forceSetTemporaryPassword(
+    employeeId: string,
+    temporaryPassword: string,
+    dataSource: DataSource,
+  ): Promise<Date> {
     const repo = dataSource.getRepository(Employee);
     const employee = await repo.findOne({ where: { id: employeeId } });
 
@@ -1401,7 +1418,6 @@ export class EmployeesService {
       throw new BadRequestException('Employee not found');
     }
 
-    const temporaryPassword = this.passwordService.generateTemporaryPassword();
     const hashedPassword =
       await this.passwordService.hashPassword(temporaryPassword);
     const expiresAt = this.passwordService.getTempPasswordExpiry();
@@ -1410,9 +1426,11 @@ export class EmployeesService {
       password: hashedPassword,
       mustChangePassword: true,
       passwordChangedAt: null,
+      failedLoginAttempts: 0,
+      lockedUntil: null,
     });
 
-    return { temporaryPassword, expiresAt };
+    return expiresAt;
   }
 
   /**

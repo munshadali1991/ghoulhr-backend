@@ -32,17 +32,17 @@ export class Employee extends BaseEntity {
 
   @Column()
   @Index({ unique: true })
-  employeeCode: string;
+  employeeCode: string | undefined;
 
   @Column()
-  name: string;
+  name: string | undefined;
 
   @Column()
   @Index()
-  email: string;
+  email: string | undefined;
 
   @Column()
-  password: string;
+  password: string | undefined;
 
   @Column({
     type: 'enum',
@@ -50,7 +50,7 @@ export class Employee extends BaseEntity {
     default: EmployeeRole.EMPLOYEE,
   })
   @Index()
-  role: EmployeeRole;
+  role: EmployeeRole | undefined;
 
   @Column({
     type: 'enum',
@@ -58,7 +58,7 @@ export class Employee extends BaseEntity {
     default: EmployeeStatus.PENDING_ACTIVATION,
   })
   @Index()
-  status: EmployeeStatus;
+  status: EmployeeStatus | undefined;
 
   @Column({ type: 'uuid', nullable: true })
   @Index()
@@ -165,23 +165,23 @@ export class Employee extends BaseEntity {
 
   // Authentication & Security
   @Column({ type: 'boolean', default: true })
-  mustChangePassword: boolean;
+  mustChangePassword: boolean | undefined;
 
   @Column({ nullable: true })
-  passwordChangedAt?: Date;
+  passwordChangedAt?: Date | null;
 
   @Column({ nullable: true })
-  lastLoginAt?: Date;
+  lastLoginAt?: Date | null;
 
   @Column({ type: 'int', default: 0 })
-  failedLoginAttempts: number;
+  failedLoginAttempts: number | undefined;
 
   @Column({ nullable: true })
-  lockedUntil?: Date;
+  lockedUntil?: Date | null;
 
   // Audit
   @Column()
-  createdBy: string;
+  createdBy: string | undefined;
 
   @Column({ nullable: true })
   updatedBy?: string;

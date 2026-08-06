@@ -2,6 +2,7 @@ import {
   Injectable,
   ConflictException,
   NotFoundException,
+  BadRequestException,
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -22,6 +23,8 @@ import { OrganizationEntitlementService } from '../rbac/organization-entitlement
 import { RbacSeedService } from '../rbac/rbac-seed.service';
 import { TenantSslProvisioningService } from './tenant-ssl-provisioning.service';
 import { OrganizationSubscriptionService } from '../subscriptions/organization-subscription.service';
+import { PasswordService } from '../common/services/password.service';
+import { EmailService } from '../modules/email/email.service';
 
 @Injectable()
 export class OrganizationsService {
@@ -43,6 +46,8 @@ export class OrganizationsService {
     private readonly rbacSeedService: RbacSeedService,
     private readonly tenantSslProvisioningService: TenantSslProvisioningService,
     private readonly subscriptionService: OrganizationSubscriptionService,
+    private readonly passwordService: PasswordService,
+    private readonly emailService: EmailService,
   ) {}
 
   async create(dto: CreateOrganizationDto) {
@@ -546,5 +551,114 @@ export class OrganizationsService {
     }
 
     return true;
+  }
+
+  async regenerateAdminPassword(organizationId: string) {
+    const organization = await this.findById(organizationId);
+    const adminEmail = organization.adminEmail?.trim().toLowerCase();
+    if (!adminEmail) {
+      throw new BadRequestException(
+        'Organization has no admin email. Set Admin Email first, then regenerate.',
+      );
+    }
+
+    await this.ensureOrgAdminExists(organization, adminEmail);
+    await this.ensureOrgAdminRbacRole(organization, adminEmail);
+
+    const tenantDataSource =
+      await this.tenantConnectionManager.getOrCreateConnection(organization);
+    const employee = await this.employeesService.findByEmail(
+      adminEmail,
+      tenantDataSource,
+    );
+    if (!employee) {
+      throw new BadRequestException(
+        'Organization admin employee account was not found after provisioning.',
+      );
+    }
+
+    const temporaryPassword = this.passwordService.generateTemporaryPassword();
+    const expiresAt = await this.employeesService.forceSetTemporaryPassword(
+      employee.id,
+      temporaryPassword,
+      tenantDataSource,
+    );
+
+    const masterUser =
+      (await this.userRepo.findOne({
+        where: {
+          organizationId: organization.id,
+          role: Role.ORG_ADMIN,
+        },
+      })) ||
+      (await this.usersService.findByEmailAndOrganization(
+        adminEmail,
+        organization.id,
+      ));
+
+    if (masterUser) {
+      masterUser.password = this.hashPassword(temporaryPassword);
+      masterUser.role = Role.ORG_ADMIN;
+      await this.userRepo.save(masterUser);
+    }
+
+    const loginUrl = this.buildTenantLoginUrl(organization.subdomain);
+    this.logger.log(
+      `Regenerated org admin password for "${organization.subdomain}" (${adminEmail})`,
+    );
+
+    return {
+      organizationId: organization.id,
+      organizationName: organization.name,
+      subdomain: organization.subdomain,
+      adminName: organization.adminName || employee.name,
+      email: adminEmail,
+      temporaryPassword,
+      expiresAt,
+      loginUrl,
+      message:
+        'Admin password regenerated. Copy credentials now — they will not be shown again.',
+    };
+  }
+
+  async emailAdminCredentials(
+    organizationId: string,
+    temporaryPassword: string,
+  ) {
+    const organization = await this.findById(organizationId);
+    const adminEmail = organization.adminEmail?.trim().toLowerCase();
+    if (!adminEmail) {
+      throw new BadRequestException('Organization has no admin email.');
+    }
+
+    const password = temporaryPassword?.trim();
+    if (!password) {
+      throw new BadRequestException('temporaryPassword is required');
+    }
+
+    await this.emailService.sendEmployeeCreated({
+      to: adminEmail,
+      employeeName: organization.adminName || organization.subdomain,
+      organizationName: organization.name,
+      subdomain: organization.subdomain,
+      email: adminEmail,
+      temporaryPassword: password,
+      designationName: 'Organization Admin',
+    });
+
+    return {
+      ok: true,
+      to: adminEmail,
+      message: `Credentials emailed to ${adminEmail}`,
+    };
+  }
+
+  private buildTenantLoginUrl(subdomain: string): string {
+    const appDomain =
+      this.configService.get<string>('APP_DOMAIN') || 'ghoulhr.com';
+    const host = subdomain?.trim()
+      ? `${subdomain.trim()}.${appDomain}`
+      : appDomain;
+    return `https://${host}/login`;
   }
 }
