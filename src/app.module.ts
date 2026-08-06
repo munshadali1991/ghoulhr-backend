@@ -20,6 +20,7 @@ import { RbacModule } from './rbac/rbac.module';
 import { StorageModule } from './storage/storage.module';
 import { HrDashboardModule } from './hr-dashboard/hr-dashboard.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
+import { EmailModule } from './modules/email';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     RbacModule,
     StorageModule,
     HrDashboardModule,
+    EmailModule,
   ],
   controllers: [AppController],
   providers: [AppService],

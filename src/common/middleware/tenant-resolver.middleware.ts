@@ -8,7 +8,7 @@ import {
 import { Request, Response, NextFunction } from 'express';
 import { DataSource } from 'typeorm';
 import { OrganizationsService } from '../../organizations/organizations.service';
-import { OrganizationStatus } from 'src/organizations/organization-status.enum';
+import { OrganizationStatus } from '../../organizations/organization-status.enum';
 import { TenantConnectionManager } from '../../core/database/tenant-connection.manager';
 import { ConfigService } from '@nestjs/config';
 
