@@ -25,6 +25,7 @@ import { TenantSslProvisioningService } from './tenant-ssl-provisioning.service'
 import { OrganizationSubscriptionService } from '../subscriptions/organization-subscription.service';
 import { PasswordService } from '../common/services/password.service';
 import { EmailService } from '../modules/email/email.service';
+import { buildTenantLoginUrl } from '../common/utils/tenant-login-url.util';
 
 @Injectable()
 export class OrganizationsService {
@@ -654,11 +655,6 @@ export class OrganizationsService {
   }
 
   private buildTenantLoginUrl(subdomain: string): string {
-    const appDomain =
-      this.configService.get<string>('APP_DOMAIN') || 'ghoulhr.com';
-    const host = subdomain?.trim()
-      ? `${subdomain.trim()}.${appDomain}`
-      : appDomain;
-    return `https://${host}/login`;
+    return buildTenantLoginUrl(this.configService, subdomain);
   }
 }

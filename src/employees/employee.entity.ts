@@ -10,6 +10,13 @@ import {
 import { BaseEntity } from '../database/base.entity';
 import { Department } from './entities/department.entity';
 import { Designation } from './entities/designation.entity';
+import { EmployeeEmploymentDetail } from './entities/employee-employment-detail.entity';
+import { EmployeeSalaryDetail } from './entities/employee-salary-detail.entity';
+import { EmployeeBankDetail } from './entities/employee-bank-detail.entity';
+import { EmployeeAccessControl } from './entities/employee-access.entity';
+import { EmployeeDocument } from './entities/employee-document.entity';
+import { EmployeeAuditLog } from './entities/employee-audit-log.entity';
+import { EmployeeEmergencyContact } from './entities/employee-emergency-contact.entity';
 
 export enum EmployeeRole {
   ORG_ADMIN = 'ORG_ADMIN',
@@ -28,21 +35,21 @@ export enum EmployeeStatus {
 export class Employee extends BaseEntity {
   @Column({ type: 'uuid', nullable: true })
   @Index()
-  organizationId?: string;
+  organizationId?: string | null;
 
   @Column()
   @Index({ unique: true })
-  employeeCode: string | undefined;
+  employeeCode!: string;
 
   @Column()
-  name: string | undefined;
+  name!: string;
 
   @Column()
   @Index()
-  email: string | undefined;
+  email!: string;
 
   @Column()
-  password: string | undefined;
+  password!: string;
 
   @Column({
     type: 'enum',
@@ -50,7 +57,7 @@ export class Employee extends BaseEntity {
     default: EmployeeRole.EMPLOYEE,
   })
   @Index()
-  role: EmployeeRole | undefined;
+  role!: EmployeeRole;
 
   @Column({
     type: 'enum',
@@ -58,114 +65,114 @@ export class Employee extends BaseEntity {
     default: EmployeeStatus.PENDING_ACTIVATION,
   })
   @Index()
-  status: EmployeeStatus | undefined;
+  status!: EmployeeStatus;
 
   @Column({ type: 'uuid', nullable: true })
   @Index()
-  departmentId?: string;
+  departmentId?: string | null;
 
   @ManyToOne(() => Department, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'departmentId' })
-  departmentRef?: Department;
+  departmentRef?: Department | null;
 
   @Column({ type: 'uuid', nullable: true })
   @Index()
-  designationId?: string;
+  designationId?: string | null;
 
   @ManyToOne(() => Designation, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'designationId' })
-  designationRef?: Designation;
+  designationRef?: Designation | null;
 
   @Column({ nullable: true })
-  phoneNumber?: string;
+  phoneNumber?: string | null;
 
   @Column({ nullable: true })
-  dateOfBirth?: Date;
+  dateOfBirth?: Date | null;
 
   @Column({ nullable: true })
-  dateOfJoining?: Date;
+  dateOfJoining?: Date | null;
 
   @Column({ nullable: true })
-  dateOfExit?: Date;
+  dateOfExit?: Date | null;
 
   @Column({ nullable: true })
-  probationEndDate?: Date;
+  probationEndDate?: Date | null;
 
   @Column({ nullable: true })
-  address?: string;
+  address?: string | null;
 
   @Column({ nullable: true })
-  emergencyContact?: string;
+  emergencyContact?: string | null;
 
   @Column({ nullable: true })
-  bloodGroup?: string;
+  bloodGroup?: string | null;
 
   @Column({ nullable: true })
-  bankName?: string;
+  bankName?: string | null;
 
   @Column({ nullable: true })
-  accountNumber?: string;
+  accountNumber?: string | null;
 
   @Column({ nullable: true })
-  ifscCode?: string;
+  ifscCode?: string | null;
 
   @Column({ nullable: true })
-  panNumber?: string;
+  panNumber?: string | null;
 
   @Column({ type: 'text', nullable: true })
   panNumberEnc?: string | null;
 
   @Column({ nullable: true })
-  aadhaarNumber?: string;
+  aadhaarNumber?: string | null;
 
   @Column({ type: 'text', nullable: true })
   aadhaarNumberEnc?: string | null;
 
   @Column({ nullable: true })
-  passportNumber?: string;
+  passportNumber?: string | null;
 
   @Column({ type: 'date', nullable: true })
-  passportExpiry?: Date;
+  passportExpiry?: Date | null;
 
   @Column({ nullable: true })
-  firstName?: string;
+  firstName?: string | null;
 
   @Column({ nullable: true })
-  middleName?: string;
+  middleName?: string | null;
 
   @Column({ nullable: true })
-  lastName?: string;
+  lastName?: string | null;
 
   @Column({ nullable: true })
-  gender?: string;
+  gender?: string | null;
 
   @Column({ nullable: true })
-  personalEmail?: string;
+  personalEmail?: string | null;
 
   @Column({ nullable: true })
-  officialEmail?: string;
+  officialEmail?: string | null;
 
   @Column({ nullable: true })
-  alternateMobile?: string;
+  alternateMobile?: string | null;
 
   @Column({ type: 'text', nullable: true })
-  profilePhotoUrl?: string;
+  profilePhotoUrl?: string | null;
 
   @Column({ type: 'varchar', length: 1024, nullable: true })
   profilePhotoStorageKey?: string | null;
 
   @Column({ nullable: true })
-  uanNumber?: string;
+  uanNumber?: string | null;
 
   @Column({ nullable: true })
-  esiNumber?: string;
+  esiNumber?: string | null;
 
   @Column({ nullable: true })
-  pfNumber?: string;
+  pfNumber?: string | null;
 
   // Authentication & Security
   @Column({ type: 'boolean', default: true })
-  mustChangePassword: boolean | undefined;
+  mustChangePassword!: boolean;
 
   @Column({ nullable: true })
   passwordChangedAt?: Date | null;
@@ -174,36 +181,36 @@ export class Employee extends BaseEntity {
   lastLoginAt?: Date | null;
 
   @Column({ type: 'int', default: 0 })
-  failedLoginAttempts: number | undefined;
+  failedLoginAttempts!: number;
 
   @Column({ nullable: true })
   lockedUntil?: Date | null;
 
   // Audit
   @Column()
-  createdBy: string | undefined;
+  createdBy!: string;
 
   @Column({ nullable: true })
-  updatedBy?: string;
+  updatedBy?: string | null;
 
-  @OneToOne('EmployeeEmploymentDetail', 'employee')
-  employmentDetail?: unknown;
+  @OneToOne(() => EmployeeEmploymentDetail, (d) => d.employee)
+  employmentDetail?: EmployeeEmploymentDetail;
 
-  @OneToOne('EmployeeSalaryDetail', 'employee')
-  salaryDetail?: unknown;
+  @OneToOne(() => EmployeeSalaryDetail, (d) => d.employee)
+  salaryDetail?: EmployeeSalaryDetail;
 
-  @OneToOne('EmployeeBankDetail', 'employee')
-  bankDetail?: unknown;
+  @OneToOne(() => EmployeeBankDetail, (d) => d.employee)
+  bankDetail?: EmployeeBankDetail;
 
-  @OneToOne('EmployeeAccessControl', 'employee')
-  accessControl?: unknown;
+  @OneToOne(() => EmployeeAccessControl, (d) => d.employee)
+  accessControl?: EmployeeAccessControl;
 
-  @OneToMany('EmployeeDocument', 'employee')
-  documents?: unknown[];
+  @OneToMany(() => EmployeeDocument, (d) => d.employee)
+  documents?: EmployeeDocument[];
 
-  @OneToMany('EmployeeAuditLog', 'employee')
-  auditLogs?: unknown[];
+  @OneToMany(() => EmployeeAuditLog, (d) => d.employee)
+  auditLogs?: EmployeeAuditLog[];
 
-  @OneToOne('EmployeeEmergencyContact', 'employee')
-  emergencyContactDetail?: unknown;
+  @OneToOne(() => EmployeeEmergencyContact, (d) => d.employee)
+  emergencyContactDetail?: EmployeeEmergencyContact;
 }

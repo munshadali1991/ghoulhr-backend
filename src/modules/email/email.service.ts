@@ -6,6 +6,7 @@ import { renderLeaveAppliedEmail } from './templates/leave-applied.template';
 import { renderLeaveApprovedEmail } from './templates/leave-approved.template';
 import { renderTimesheetApprovedEmail } from './templates/timesheet-approved.template';
 import { renderAccountActivatedEmail } from './templates/account-activated.template';
+import { buildTenantLoginUrl } from '../../common/utils/tenant-login-url.util';
 
 export interface SendEmployeeCreatedEmailDto {
   to: string;
@@ -171,10 +172,6 @@ export class EmailService {
   }
 
   private buildTenantLoginUrl(subdomain: string): string {
-    const appDomain = this.configService.get<string>('APP_DOMAIN') || 'ghoulhr.com';
-    const host = subdomain?.trim()
-      ? `${subdomain.trim()}.${appDomain}`
-      : appDomain;
-    return `https://${host}/login`;
+    return buildTenantLoginUrl(this.configService, subdomain);
   }
 }
