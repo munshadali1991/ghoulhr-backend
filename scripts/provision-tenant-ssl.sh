@@ -12,9 +12,10 @@ if [[ ! "$FQDN" =~ ^[a-z0-9-]+(\.[a-z0-9-]+)+$ ]]; then
   exit 1
 fi
 
-APP_BASE_PATH="${APP_BASE_PATH:-/ghoulhrms}"
 API_UPSTREAM="${API_UPSTREAM:-http://127.0.0.1:3000/}"
+STAGING_API_UPSTREAM="${STAGING_API_UPSTREAM:-http://127.0.0.1:3100/}"
 FRONTEND_UPSTREAM="${FRONTEND_UPSTREAM:-http://127.0.0.1:4173/}"
+STAGING_FRONTEND_UPSTREAM="${STAGING_FRONTEND_UPSTREAM:-http://127.0.0.1:4273/}"
 NGINX_SITE_PATH="/etc/nginx/sites-available/tenant-${FQDN}.conf"
 NGINX_SITE_LINK="/etc/nginx/sites-enabled/tenant-${FQDN}.conf"
 
@@ -84,18 +85,42 @@ server {
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
     location = / {
-        return 301 $APP_BASE_PATH/login;
+        return 301 /login;
     }
 
-    location = /login {
-        return 301 $APP_BASE_PATH/login;
+    location = /staging {
+        return 301 /staging/\$is_args\$args;
     }
 
-    location / {
-        return 301 $APP_BASE_PATH\$request_uri;
+    location /staging/api/v1/ {
+        proxy_pass $STAGING_API_UPSTREAM;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection upgrade;
     }
 
-    location $APP_BASE_PATH/api/v1/ {
+    location /staging/ {
+        proxy_pass $STAGING_FRONTEND_UPSTREAM;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location = /ghoulhrms {
+        return 301 /login;
+    }
+
+    location /ghoulhrms/ {
+        rewrite ^/ghoulhrms/(.*)\$ /\$1 permanent;
+    }
+
+    location /api/v1/ {
         proxy_pass $API_UPSTREAM;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
@@ -106,7 +131,7 @@ server {
         proxy_set_header Connection upgrade;
     }
 
-    location $APP_BASE_PATH/ {
+    location / {
         proxy_pass $FRONTEND_UPSTREAM;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
