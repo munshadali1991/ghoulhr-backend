@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { EmployeesModule } from '../employees/employees.module';
 import { SettingsModule } from '../settings/settings.module';
 import { EmailModule } from '../modules/email';
+import { OrganizationsModule } from '../organizations/organizations.module';
+import { DatabaseCoreModule } from '../core/database/database-core.module';
 import { FieldEncryptionService } from '../common/services/field-encryption.service';
 import { EssAttendanceController } from './attendance/ess-attendance.controller';
 import { EssAttendanceService } from './attendance/ess-attendance.service';
@@ -18,6 +20,8 @@ import { LeaveDayCalculatorService } from './leave/leave-day-calculator.service'
 import { LeavePolicyService } from './leave/leave-policy.service';
 import { LeaveValidationService } from './leave/leave-validation.service';
 import { LeaveNotificationService } from './leave/leave-notification.service';
+import { PendingLeaveApprovalReminderService } from './leave/pending-leave-approval-reminder.service';
+import { PendingLeaveApprovalReminderCronService } from './leave/pending-leave-approval-reminder.cron';
 import { EssNotificationsController } from './notifications/ess-notifications.controller';
 import { EssNotificationsService } from './notifications/ess-notifications.service';
 import { EssTimesheetController } from './timesheet/ess-timesheet.controller';
@@ -29,7 +33,13 @@ import { PerformanceMasterController } from './performance/performance-master.co
 import { PerformanceMasterService } from './performance/performance-master.service';
 
 @Module({
-  imports: [EmployeesModule, SettingsModule, EmailModule],
+  imports: [
+    EmployeesModule,
+    SettingsModule,
+    EmailModule,
+    OrganizationsModule,
+    DatabaseCoreModule,
+  ],
   controllers: [
     EssLeaveController,
     EssLeaveCalendarController,
@@ -57,6 +67,8 @@ import { PerformanceMasterService } from './performance/performance-master.servi
     LeaveDayCalculatorService,
     LeaveValidationService,
     LeaveNotificationService,
+    PendingLeaveApprovalReminderService,
+    PendingLeaveApprovalReminderCronService,
     FieldEncryptionService,
   ],
 })

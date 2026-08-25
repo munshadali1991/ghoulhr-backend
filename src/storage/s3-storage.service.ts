@@ -108,6 +108,11 @@ export class S3StorageService {
     if (params.category === 'organization-files') {
       if (params.module === 'branding') {
         storageKey = `${orgPrefix}/organization-files/branding/logo/${documentId}_${safeName}`;
+      } else if (params.module === 'document-centre') {
+        const docTypeSegment = (params.documentType || 'general')
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]+/g, '-');
+        storageKey = `${orgPrefix}/organization-files/document-centre/${docTypeSegment}/${documentId}_${safeName}`;
       } else {
         storageKey = `${orgPrefix}/organization-files/${params.module || 'misc'}/${documentId}_${safeName}`;
       }
@@ -125,6 +130,8 @@ export class S3StorageService {
     } else if (params.module === 'leave') {
       const leaveSegment = params.leaveRequestId || 'pending';
       storageKey = `${orgPrefix}/employee-documents/leave/${employeeSegment}/${leaveSegment}/${documentId}_${safeName}`;
+    } else if (params.module === 'document-centre') {
+      storageKey = `${orgPrefix}/employee-documents/document-centre/${employeeSegment}/${docTypeSegment}/${documentId}_${safeName}`;
     } else {
       storageKey = `${orgPrefix}/employee-documents/onboarding/${employeeSegment}/${docTypeSegment}/${documentId}_${safeName}`;
     }

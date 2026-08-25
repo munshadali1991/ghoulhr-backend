@@ -11,7 +11,11 @@ export const STORAGE_MODULES = [
   'leave',
   'profile-photos',
   'branding',
+  'document-centre',
 ] as const;
+
+/** Larger uploads for Excel/ZIP bulk Document Centre flows. */
+export const DOCUMENT_CENTRE_MAX_FILE_BYTES = 15 * 1024 * 1024;
 
 export type StorageModule = (typeof STORAGE_MODULES)[number];
 

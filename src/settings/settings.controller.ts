@@ -8,6 +8,7 @@ import {
   Param,
   UseGuards,
   Req,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { SettingsService } from './settings.service';
@@ -32,6 +33,7 @@ import { SubscriptionGuard } from '../subscriptions/guards/subscription.guard';
 import { PermissionsGuard } from '../rbac/guards/permissions.guard';
 import { RequirePermissions, RequireAnyPermission } from '../rbac/decorators/require-permissions.decorator';
 import type { TenantRequest } from '../common/middleware/tenant-resolver.middleware';
+import { isReservedSettingPathKey } from './settings.constants';
 
 @ApiTags('Settings')
 @ApiBearerAuth()
@@ -337,6 +339,11 @@ export class SettingsController {
   )
   @ApiOperation({ summary: 'Get setting by key' })
   async getSetting(@Req() req: TenantRequest, @Param('key') key: string) {
+    if (isReservedSettingPathKey(key)) {
+      throw new BadRequestException(
+        `'${key}' is a reserved settings path, not a setting key`,
+      );
+    }
     return this.settingsService.getSetting(key, req.tenantDataSource);
   }
 

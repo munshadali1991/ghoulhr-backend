@@ -92,3 +92,25 @@ export const VALID_TRACKING_MODES = [
   'geo',
   'ip',
 ] as const;
+
+/** First-segment /settings/:key values that are real feature routes, not KV setting keys. */
+export const RESERVED_SETTING_PATH_KEYS = [
+  'profile',
+  'branding',
+  'employee',
+  'departments',
+  'designations',
+  'attendance',
+  'timesheet',
+  'locations',
+  'leave-config',
+  'leave',
+  'organization',
+  'performance',
+  'skills',
+  'rbac',
+] as const;
+
+export function isReservedSettingPathKey(key: string): boolean {
+  return (RESERVED_SETTING_PATH_KEYS as readonly string[]).includes(key);
+}

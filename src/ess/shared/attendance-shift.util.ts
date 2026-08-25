@@ -203,3 +203,46 @@ export function shouldFlagAttendanceException(params: {
   if (shortfallMinutes > 0) return true;
   return false;
 }
+
+/** True when shift end is at or before start (spans midnight). */
+export function isOvernightShift(startTime: string, endTime: string): boolean {
+  const sm = parseTimeToMinutes(startTime);
+  const em = parseTimeToMinutes(endTime);
+  if (sm == null || em == null) return false;
+  return em <= sm;
+}
+
+/**
+ * Pair IN/OUT punches chronologically. Open trailing IN is kept without out.
+ * Optional filter keeps only pairs whose IN falls on `workDateKey` (org TZ).
+ */
+export function pairPunches(
+  punches: { punchedAt: Date; punchType: string }[],
+  options?: {
+    workDateKey?: string;
+    dateKeyForInstant?: (instant: Date) => string;
+  },
+): PunchPair[] {
+  const pairs: PunchPair[] = [];
+  let currentIn: Date | null = null;
+
+  for (const p of punches) {
+    if (p.punchType === 'IN') {
+      currentIn = p.punchedAt;
+    } else if (p.punchType === 'OUT' && currentIn) {
+      pairs.push({ in: currentIn, out: p.punchedAt });
+      currentIn = null;
+    }
+  }
+  if (currentIn) {
+    pairs.push({ in: currentIn });
+  }
+
+  const workDateKey = options?.workDateKey;
+  const dateKeyForInstant = options?.dateKeyForInstant;
+  if (!workDateKey || !dateKeyForInstant) {
+    return pairs;
+  }
+
+  return pairs.filter((pair) => dateKeyForInstant(pair.in) === workDateKey);
+}

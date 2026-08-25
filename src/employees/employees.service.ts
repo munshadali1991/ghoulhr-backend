@@ -4,7 +4,7 @@ import {
   Logger,
   BadRequestException,
 } from '@nestjs/common';
-import { DataSource, QueryFailedError, Repository, In } from 'typeorm';
+import { Brackets, DataSource, QueryFailedError, Repository, In } from 'typeorm';
 import { Employee, EmployeeRole, EmployeeStatus } from './employee.entity';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import {
@@ -179,13 +179,18 @@ export class EmployeesService {
     if (emails.length) {
       const qb = repo
         .createQueryBuilder('e')
-        .where('LOWER(e.email) IN (:...emails)', { emails })
-        .orWhere("LOWER(COALESCE(e.personalEmail, '')) IN (:...emails)", {
-          emails,
-        })
-        .orWhere("LOWER(COALESCE(e.officialEmail, '')) IN (:...emails)", {
-          emails,
-        });
+        .where(
+          new Brackets((emailQb) => {
+            emailQb
+              .where('LOWER(e.email) IN (:...emails)', { emails })
+              .orWhere("LOWER(COALESCE(e.personalEmail, '')) IN (:...emails)", {
+                emails,
+              })
+              .orWhere("LOWER(COALESCE(e.officialEmail, '')) IN (:...emails)", {
+                emails,
+              });
+          }),
+        );
       if (dto.excludeEmployeeId) {
         qb.andWhere('e.id != :excludeId', { excludeId: dto.excludeEmployeeId });
       }

@@ -20,6 +20,9 @@ import { RbacModule } from './rbac/rbac.module';
 import { StorageModule } from './storage/storage.module';
 import { HrDashboardModule } from './hr-dashboard/hr-dashboard.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
+import { LeadsModule } from './leads/leads.module';
+import { DocumentCentreModule } from './document-centre/document-centre.module';
+import { SkillsModule } from './skills/skills.module';
 
 @Module({
   imports: [
@@ -38,12 +41,15 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     UsersModule,
     OrganizationsModule,
     SubscriptionsModule,
+    LeadsModule,
     EmployeesModule,
     SettingsModule,
     EssModule,
     RbacModule,
     StorageModule,
     HrDashboardModule,
+    DocumentCentreModule,
+    SkillsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

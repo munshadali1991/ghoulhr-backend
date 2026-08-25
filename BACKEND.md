@@ -42,7 +42,7 @@ backend/ghoulhr-backend/
 │   ├── database/                  # Master TypeORM config + BaseEntity
 │   ├── core/database/             # TenantConnectionManager, MigrationRunnerService
 │   ├── common/                    # Tenant middleware, password/encryption, @Roles
-│   ├── modules/email/             # Admin credential emails (stub / logs today)
+│   ├── modules/email/             # AWS SES transactional email (see EMAIL.md)
 │   └── migrations/
 │       ├── *.ts                   # Master DB migrations (auto-run on boot)
 │       └── tenant/*.ts            # Tenant DB migrations (run on org create / CLI)
@@ -227,7 +227,7 @@ Employee login may return `requiresPasswordChange: true` when `mustChangePasswor
 1. Insert master `organizations` row (`dbName`, `dbHost`, `dbUser`, `dbPassword`, `orgPort`)
 2. `CREATE DATABASE` for tenant
 3. Connect tenant DS + `MigrationRunnerService.runMigrations()`
-4. If `adminEmail` set — provision tenant ORG_ADMIN (`EmployeesService`) and log credentials via `EmailService` (stub)
+4. If `adminEmail` set — provision tenant ORG_ADMIN (`EmployeesService`); no welcome email yet (see `src/modules/email/EMAIL.md` candidates)
 5. Trigger optional SSL auto-provisioning for `${subdomain}.${SSL_AUTO_BASE_DOMAIN}` (non-blocking)
 6. On failure — drop tenant DB + delete master row
 
@@ -361,7 +361,9 @@ Master-table service used by `AuthService` and `OrganizationsService`. No public
 
 ### Email (`modules/email`)
 
-`EmailService` — logs admin/employee credential payloads today; intended for future SMTP/provider integration.
+Transactional mail via **AWS SES SMTP** (`EmailService` → `SesMailerService` / nodemailer).
+
+**Registry (consumers, templates, how to add a new type):** [`src/modules/email/EMAIL.md`](src/modules/email/EMAIL.md)
 
 ## Tenant Data Model (tables)
 
@@ -554,7 +556,7 @@ See `docs/RBAC.md` for full architecture.
 ## Current-State Notes
 
 - Swagger Bearer auth is optional; production clients should use cookies with `credentials: include`.
-- `EmailService` does not send real email yet — credentials are logged server-side.
+- Email sends via AWS SES when `AWS_SES_*` env is set; see [`src/modules/email/EMAIL.md`](src/modules/email/EMAIL.md) for the live catalog and gaps (e.g. org-admin provision still has no welcome mail).
 - `GET /` is the implemented health endpoint; `/health` is only excluded from tenant middleware.
 - Platform `Role.MANAGER` exists on master users but tenant employee roles use `EmployeeRole`; align new features with tenant enums for employee APIs.
 - Attendance **shifts** in API responses are backed by `work_shift_configurations`; legacy JSON in `attendance.shifts` is migrated on read when needed.

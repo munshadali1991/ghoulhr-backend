@@ -18,6 +18,15 @@ export interface PublishedHolidayRow {
   holidayType: CalendarHolidayType;
 }
 
+/** Civil YYYY-MM-DD for string dates or Date values from DATE columns (UTC midnight). */
+function holidayDateKey(value: string | Date): string {
+  if (typeof value === 'string') return value.slice(0, 10);
+  const y = value.getUTCFullYear();
+  const m = String(value.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(value.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 @Injectable()
 export class OrganizationCalendarQueryService {
   appliesToLocation(
@@ -66,10 +75,7 @@ export class OrganizationCalendarQueryService {
         id: h.id,
         organizationId: h.organizationId,
         locationId: h.locationId,
-        holidayDate:
-          typeof h.holidayDate === 'string'
-            ? h.holidayDate
-            : (h.holidayDate as Date).toISOString().slice(0, 10),
+        holidayDate: holidayDateKey(h.holidayDate as string | Date),
         name: h.name,
         holidayType: h.holidayType,
       }));
@@ -110,10 +116,7 @@ export class OrganizationCalendarQueryService {
         id: h.id,
         organizationId: h.organizationId,
         locationId: h.locationId,
-        holidayDate:
-          typeof h.holidayDate === 'string'
-            ? h.holidayDate
-            : (h.holidayDate as Date).toISOString().slice(0, 10),
+        holidayDate: holidayDateKey(h.holidayDate as string | Date),
         name: h.name,
         holidayType: h.holidayType,
       }));

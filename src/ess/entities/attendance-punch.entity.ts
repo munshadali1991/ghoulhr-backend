@@ -35,4 +35,11 @@ export class AttendancePunch extends BaseEntity {
 
   @Column({ type: 'double precision', nullable: true })
   longitude?: number | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  ipAddress?: string | null;
+
+  /** Work location chosen at sign-in (IN punches only). */
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  signInLocation?: string | null;
 }

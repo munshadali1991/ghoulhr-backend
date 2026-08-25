@@ -29,6 +29,7 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   perm('employees:reset-password', 'reset-password', 'Reset employee passwords'),
   perm('employees:reporting-manager:read', 'read', 'View reporting manager assignments'),
   perm('employees:reporting-manager:assign', 'assign', 'Assign reporting managers'),
+  perm('employees.skills:read', 'read', 'View employee skill profiles'),
 
   // Settings
   perm('settings.organization:read', 'read', 'View organization profile settings'),
@@ -49,16 +50,30 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   perm('settings.leave:write', 'write', 'Update leave configurations'),
   perm('settings.performance:read', 'read', 'View performance assessment master'),
   perm('settings.performance:write', 'write', 'Update performance assessment master'),
+  perm('settings.skills:read', 'read', 'View skills master'),
+  perm('settings.skills:write', 'write', 'Create and update skills master'),
 
   // ESS
   perm('ess.leave:read', 'read', 'View own leave data'),
   perm('ess.leave:apply', 'apply', 'Apply for leave'),
   perm('ess.attendance:read', 'read', 'View own attendance'),
   perm('ess.attendance:punch', 'punch', 'Sign in/out attendance'),
+  perm(
+    'ess.attendance.swipes:read',
+    'read',
+    'View employee swipe history for people in scope',
+  ),
   perm('ess.timesheet:read', 'read', 'View own timesheet'),
   perm('ess.timesheet:write', 'write', 'Edit own timesheet entries'),
   perm('ess.performance:read', 'read', 'View own performance assessments'),
   perm('ess.performance:write', 'write', 'Complete own self-assessment'),
+  perm('ess.documents:read', 'read', 'View own Form 16 and company documents'),
+  perm('ess.skills:read', 'read', 'View own skills'),
+  perm('ess.skills:write', 'write', 'Add and update own skills'),
+
+  // Document Centre (HR)
+  perm('documents:read', 'read', 'View all Document Centre records including confidential'),
+  perm('documents:write', 'write', 'Upload and manage Document Centre files'),
 
   // Approvals
   perm('approvals.leave:read', 'read', 'View leave requests pending approval'),
@@ -79,6 +94,21 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
 
   // Dashboards
   perm('dashboard.ess:read', 'read', 'View employee home dashboard'),
+  perm(
+    'dashboard.ess.team-on-leave:read',
+    'read',
+    'View Team On Leave card on Employee home (approved leave for people in scope)',
+  ),
+  perm(
+    'dashboard.ess.track:read',
+    'read',
+    'View Track card on Employee home (own pending leave applications)',
+  ),
+  perm(
+    'dashboard.ess.who-is-in:read',
+    'read',
+    'View Who is in card and attendance roster for people in scope',
+  ),
   perm('dashboard.hr:read', 'read', 'View HR organization dashboard'),
   perm('dashboard.manager:read', 'read', 'View manager dashboard'),
   perm('dashboard.payroll:read', 'read', 'View payroll dashboard'),
@@ -108,12 +138,17 @@ const ESS_PERMISSIONS = [
   'ess.timesheet:write',
   'ess.performance:read',
   'ess.performance:write',
+  'ess.documents:read',
+  'ess.skills:read',
+  'ess.skills:write',
   'dashboard.ess:read',
+  'dashboard.ess.track:read',
 ];
 
 const MANAGER_PERMISSIONS = [
   ...ESS_PERMISSIONS,
   'employees:read',
+  'employees.skills:read',
   'employees:reporting-manager:read',
   'approvals.leave:read',
   'approvals.leave:act',
@@ -123,6 +158,9 @@ const MANAGER_PERMISSIONS = [
   'performance.review:act',
   'dashboard.manager:read',
   'dashboard.approvals:read',
+  'dashboard.ess.team-on-leave:read',
+  'dashboard.ess.who-is-in:read',
+  'ess.attendance.swipes:read',
 ];
 
 const HR_ADMIN_PERMISSIONS = [
@@ -148,8 +186,12 @@ const HR_ADMIN_PERMISSIONS = [
   'settings.leave:write',
   'settings.performance:read',
   'settings.performance:write',
+  'settings.skills:read',
+  'settings.skills:write',
   'settings.attendance:read',
   'settings.attendance:write',
+  'documents:read',
+  'documents:write',
 ];
 
 const PAYROLL_ADMIN_PERMISSIONS = [
@@ -160,6 +202,8 @@ const PAYROLL_ADMIN_PERMISSIONS = [
   'payroll:run',
   'dashboard.payroll:read',
   'dashboard.hr:read',
+  'documents:read',
+  'documents:write',
 ];
 
 const ORG_ADMIN_PERMISSIONS = [...ALL_PERMISSION_CODES];
@@ -200,9 +244,13 @@ export const SYSTEM_ROLES: SystemRoleDefinition[] = [
     permissionCodes: [
       ...ESS_PERMISSIONS,
       'employees:read',
+      'employees.skills:read',
       'approvals.leave:read',
       'approvals.leave:act',
       'dashboard.approvals:read',
+      'dashboard.ess.team-on-leave:read',
+      'dashboard.ess.who-is-in:read',
+      'ess.attendance.swipes:read',
     ],
     isSystem: true,
   },

@@ -3,8 +3,13 @@ import { EntityManager } from 'typeorm';
 import { Employee } from '../../employees/employee.entity';
 import { LeaveConfiguration } from '../../settings/entities/leave-configuration.entity';
 import { EmployeeLeaveBalance } from '../entities/employee-leave-balance.entity';
+import { LeaveRequest } from '../entities/leave-request.entity';
 import { CreateLeaveRequestDto } from './dto/create-leave-request.dto';
 import { LeaveDayCalculatorService } from './leave-day-calculator.service';
+import {
+  leaveRangesConflict,
+  toDateKey,
+} from './leave-request-query.util';
 
 @Injectable()
 export class LeaveValidationService {
@@ -23,6 +28,12 @@ export class LeaveValidationService {
     const available = granted - used - pending;
 
     if (!policy.negativeBalanceAllowed && daysCount > available) {
+      throw new BadRequestException(
+        'Insufficient leave balance for this leave type',
+      );
+    }
+
+    if (available <= 0 && !policy.negativeBalanceAllowed && daysCount > 0) {
       throw new BadRequestException(
         'Insufficient leave balance for this leave type',
       );
@@ -75,5 +86,35 @@ export class LeaveValidationService {
       throw new BadRequestException('Selected approver is not valid');
     }
     return approver;
+  }
+
+  /**
+   * Block pending/approved leave that shares any half-day session with the new request.
+   * Morning + afternoon on the same day (non-overlapping sessions) remains allowed.
+   */
+  assertNoOverlappingLeave(
+    existing: LeaveRequest[],
+    dto: CreateLeaveRequestDto,
+  ): void {
+    const proposed = {
+      startDate: dto.fromDate,
+      endDate: dto.toDate,
+      startSession: dto.fromSession,
+      endSession: dto.toSession,
+    };
+
+    for (const row of existing) {
+      const conflicts = leaveRangesConflict(proposed, {
+        startDate: toDateKey(row.startDate),
+        endDate: toDateKey(row.endDate),
+        startSession: row.startSession,
+        endSession: row.endSession,
+      });
+      if (conflicts) {
+        throw new BadRequestException(
+          'You already have a pending or approved leave request overlapping these dates',
+        );
+      }
+    }
   }
 }

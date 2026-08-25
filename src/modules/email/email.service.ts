@@ -6,6 +6,7 @@ import { renderLeaveAppliedEmail } from './templates/leave-applied.template';
 import { renderLeaveApprovedEmail } from './templates/leave-approved.template';
 import { renderTimesheetApprovedEmail } from './templates/timesheet-approved.template';
 import { renderAccountActivatedEmail } from './templates/account-activated.template';
+import { renderPendingLeaveApprovalReminderEmail } from './templates/pending-leave-approval-reminder.template';
 
 export interface SendEmployeeCreatedEmailDto {
   to: string;
@@ -49,6 +50,19 @@ export interface SendAccountActivatedEmailDto {
   employeeName: string;
   organizationName: string;
   subdomain: string;
+}
+
+export interface SendPendingLeaveApprovalReminderDto {
+  to: string;
+  approverName: string;
+  subdomain: string;
+  pendingCount: number;
+  items: Array<{
+    applicantName: string;
+    leaveType: string;
+    startDate: string;
+    endDate: string;
+  }>;
 }
 
 @Injectable()
@@ -146,11 +160,40 @@ export class EmailService {
     });
   }
 
+  async sendPendingLeaveApprovalReminder(
+    params: SendPendingLeaveApprovalReminderDto,
+  ): Promise<void> {
+    if (params.pendingCount <= 0) {
+      return;
+    }
+
+    const approvalsUrl = this.buildTenantPathUrl(
+      params.subdomain,
+      '/leave/requests',
+    );
+    const rendered = renderPendingLeaveApprovalReminderEmail({
+      approverName: params.approverName,
+      pendingCount: params.pendingCount,
+      approvalsUrl,
+      items: params.items,
+    });
+
+    await this.sesMailer.sendMail({
+      to: params.to,
+      ...rendered,
+    });
+  }
+
   private buildTenantLoginUrl(subdomain: string): string {
+    return this.buildTenantPathUrl(subdomain, '/login');
+  }
+
+  private buildTenantPathUrl(subdomain: string, path: string): string {
     const appDomain = this.configService.get<string>('APP_DOMAIN') || 'ghoulhr.com';
     const host = subdomain?.trim()
       ? `${subdomain.trim()}.${appDomain}`
       : appDomain;
-    return `https://${host}/login`;
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+    return `https://${host}${normalizedPath}`;
   }
 }

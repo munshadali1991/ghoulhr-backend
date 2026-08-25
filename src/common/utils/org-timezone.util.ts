@@ -55,6 +55,40 @@ export function orgDateKeyForInstant(instant: Date, timezone?: string | null): s
   }).format(instant);
 }
 
+/** Local hour (0–23) for an instant in the org timezone. */
+export function orgLocalHourForInstant(
+  instant: Date,
+  timezone?: string | null,
+): number {
+  const tz = resolveOrgTimezone(timezone);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    hour: 'numeric',
+    hour12: false,
+  }).formatToParts(instant);
+  const hourRaw = Number(parts.find((p) => p.type === 'hour')?.value ?? 0);
+  // Some engines report midnight as 24 with hour12:false
+  return hourRaw === 24 ? 0 : hourRaw;
+}
+
+/**
+ * True when the org-local calendar day is among the last `n` days of that month.
+ * Example: n=3 on a 31-day month → days 29, 30, 31.
+ */
+export function isInLastNCalendarDaysOfMonth(
+  instant: Date,
+  n: number,
+  timezone?: string | null,
+): boolean {
+  if (n <= 0) return false;
+  const dateKey = orgDateKeyForInstant(instant, timezone);
+  const year = Number(dateKey.slice(0, 4));
+  const month = Number(dateKey.slice(5, 7));
+  const day = Number(dateKey.slice(8, 10));
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return day > lastDay - n;
+}
+
 function parseHm(timeStr: string): { h: number; m: number } | null {
   if (!timeStr || typeof timeStr !== 'string') return null;
   const parts = timeStr.trim().split(':');

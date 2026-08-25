@@ -18,6 +18,7 @@ import {
   ALLOWED_IMAGE_EXTENSIONS,
   ALLOWED_IMAGE_MIME_TYPES,
   DEFAULT_MAX_FILE_BYTES,
+  DOCUMENT_CENTRE_MAX_FILE_BYTES,
   LOGO_MAX_FILE_BYTES,
   PROFILE_PHOTO_MAX_FILE_BYTES,
   STORAGE_DRIVERS,
@@ -107,6 +108,18 @@ export class StorageService {
       if (dto.category !== 'employee-documents' && dto.category !== 'staging') {
         throw new BadRequestException(
           'Employee uploads must use employee-documents or staging category',
+        );
+      }
+    }
+
+    if (module === 'document-centre') {
+      if (
+        dto.category !== 'employee-documents' &&
+        dto.category !== 'organization-files' &&
+        dto.category !== 'staging'
+      ) {
+        throw new BadRequestException(
+          'Document Centre uploads must use employee-documents, organization-files, or staging',
         );
       }
     }
@@ -468,6 +481,7 @@ export class StorageService {
     );
     if (module === 'branding') return LOGO_MAX_FILE_BYTES;
     if (module === 'profile-photos') return PROFILE_PHOTO_MAX_FILE_BYTES;
+    if (module === 'document-centre') return DOCUMENT_CENTRE_MAX_FILE_BYTES;
     return configured;
   }
 

@@ -6,6 +6,7 @@ export const PLATFORM_MODULES = [
   { code: 'attendance', name: 'Attendance', description: 'Attendance tracking and policies' },
   { code: 'timesheet', name: 'Timesheet', description: 'Timesheet entry and configuration' },
   { code: 'payroll', name: 'Payroll', description: 'Payroll processing' },
+  { code: 'documents', name: 'Document Centre', description: 'Form 16, policies, and forms' },
   { code: 'tracking', name: 'Tracking', description: 'Employee tracking module' },
   { code: 'approvals', name: 'Approvals', description: 'Leave and timesheet approvals' },
   { code: 'performance', name: 'Performance', description: 'KRA and self-assessment' },
@@ -28,10 +29,15 @@ export function permissionModuleCode(permissionCode: string): string {
     if (permissionCode.startsWith('ess.attendance')) return 'attendance';
     if (permissionCode.startsWith('ess.timesheet')) return 'timesheet';
     if (permissionCode.startsWith('ess.performance')) return 'performance';
+    if (permissionCode.startsWith('ess.documents')) return 'documents';
+    if (permissionCode.startsWith('ess.skills')) return 'employees';
     return 'settings';
   }
   if (permissionCode.startsWith('performance.')) {
     return 'performance';
+  }
+  if (permissionCode.startsWith('documents')) {
+    return 'documents';
   }
   if (permissionCode.startsWith('approvals.')) {
     if (permissionCode.startsWith('approvals.leave')) return 'approvals';

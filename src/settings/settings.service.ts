@@ -18,7 +18,7 @@ import {
   UpdateDesignationsDto,
   ShiftDto,
 } from './dto/create-setting.dto';
-import { SETTING_KEYS } from './settings.constants';
+import { isReservedSettingPathKey, SETTING_KEYS } from './settings.constants';
 import { Department } from '../employees/entities/department.entity';
 import { Designation } from '../employees/entities/designation.entity';
 import { DesignationDepartment } from '../employees/entities/designation-department.entity';
@@ -61,6 +61,12 @@ export class SettingsService {
     key: string,
     dataSource: DataSource,
   ): Promise<OrganizationSetting> {
+    if (isReservedSettingPathKey(key)) {
+      throw new BadRequestException(
+        `'${key}' is a reserved settings path, not a setting key`,
+      );
+    }
+
     const repo = this.getRepository(dataSource);
     const setting = await repo.findOne({ where: { key } });
 

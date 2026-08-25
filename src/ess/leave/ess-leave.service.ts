@@ -5,14 +5,20 @@ import {
 } from '@nestjs/common';
 import { DataSource, EntityManager, In, IsNull } from 'typeorm';
 import { FieldEncryptionService } from '../../common/services/field-encryption.service';
-import { Employee, EmployeeStatus } from '../../employees/employee.entity';
+import {
+  Employee,
+  EmployeeRole,
+  EmployeeStatus,
+} from '../../employees/employee.entity';
 import {
   EmployeeReportingManager,
   REPORTING_MANAGER_TYPE_PRIMARY,
 } from '../../employees/entities/employee-reporting-manager.entity';
-import { findLeaveRequestsOverlappingRange } from './leave-request-query.util';
+import {
+  findEmployeeLeaveOverlappingRange,
+  findLeaveRequestsOverlappingRange,
+} from './leave-request-query.util';
 import { EmployeeDocument } from '../../employees/entities/employee-document.entity';
-import { EmployeeEmploymentDetail } from '../../employees/entities/employee-employment-detail.entity';
 import { Department } from '../../employees/entities/department.entity';
 import { Designation } from '../../employees/entities/designation.entity';
 import { EmployeeLeaveBalance } from '../entities/employee-leave-balance.entity';
@@ -223,12 +229,11 @@ export class EssLeaveService {
     organizationId: string,
     employeeId: string,
   ) {
-    const { locationId, employment } =
-      await this.policyService.getEmployeeContext(
-        dataSource,
-        organizationId,
-        employeeId,
-      );
+    const { locationId } = await this.policyService.getEmployeeContext(
+      dataSource,
+      organizationId,
+      employeeId,
+    );
 
     const policies = await this.policyService.getApplicablePolicies(
       dataSource,
@@ -241,15 +246,15 @@ export class EssLeaveService {
       label: p.name,
     }));
 
-    const approvers = await this.resolveApprovers(
+    const { approvers, hasAssignedManager } = await this.resolveApprovers(
       dataSource,
       employeeId,
-      employment,
     );
 
     return {
       types,
       approvers,
+      hasAssignedManager,
       rules: policies.map((p) => this.policyService.mapPolicyToRules(p)),
     };
   }
@@ -489,6 +494,22 @@ export class EssLeaveService {
 
     const year = new Date(dto.fromDate).getFullYear();
 
+    const { approvers: allowedApprovers } = await this.resolveApprovers(
+      dataSource,
+      employeeId,
+    );
+    const allowedApproverId = allowedApprovers[0]?.value;
+    if (!allowedApproverId) {
+      throw new BadRequestException(
+        'No approver is available. Assign a reporting manager or ensure an Admin exists.',
+      );
+    }
+    if (dto.applyingTo !== allowedApproverId) {
+      throw new BadRequestException(
+        'Selected approver is not valid for this employee',
+      );
+    }
+
     return dataSource.transaction(async (em) => {
       const balance = await this.balanceService.getOrCreateBalance(
         em,
@@ -524,6 +545,14 @@ export class EssLeaveService {
         dto,
         hasDocument,
       );
+
+      const overlapping = await findEmployeeLeaveOverlappingRange(dataSource, {
+        organizationId,
+        employeeId,
+        rangeStart: dto.fromDate,
+        rangeEnd: dto.toDate,
+      });
+      this.validationService.assertNoOverlappingLeave(overlapping, dto);
 
       const requestRepo = em.getRepository(LeaveRequest);
       const appliedOn = new Date().toISOString().slice(0, 10);
@@ -732,34 +761,45 @@ export class EssLeaveService {
   private async resolveApprovers(
     dataSource: DataSource,
     employeeId: string,
-    employment: EmployeeEmploymentDetail | null,
-  ): Promise<{ value: string; label: string }[]> {
+  ): Promise<{
+    approvers: { value: string; label: string }[];
+    hasAssignedManager: boolean;
+  }> {
     const empRepo = dataSource.getRepository(Employee);
     const reportingManagerId =
       await this.reportingManagersService.getActiveReportingManagerId(
         dataSource,
         employeeId,
       );
-    const ids = [reportingManagerId, employment?.hrManagerId].filter(
-      (id): id is string => Boolean(id),
-    );
 
-    if (ids.length === 0) {
-      const employees = await empRepo.find({
-        take: 20,
-        order: { name: 'ASC' },
+    if (reportingManagerId) {
+      const manager = await empRepo.findOne({
+        where: { id: reportingManagerId },
       });
-      return employees
-        .filter((e) => e.id && e.name)
-        .map((e) => ({ value: e.id, label: e.name }));
+      if (manager?.id && manager.name) {
+        return {
+          approvers: [{ value: manager.id, label: manager.name }],
+          hasAssignedManager: true,
+        };
+      }
     }
 
-    const unique = [...new Set(ids)];
-    const found = await empRepo.find({
-      where: unique.map((id) => ({ id })),
+    const admin = await empRepo.findOne({
+      where: {
+        role: EmployeeRole.ORG_ADMIN,
+        status: In([EmployeeStatus.ACTIVE, EmployeeStatus.PENDING_ACTIVATION]),
+      },
+      order: { name: 'ASC' },
     });
 
-    return found.map((e) => ({ value: e.id, label: e.name }));
+    if (admin?.id && admin.name) {
+      return {
+        approvers: [{ value: admin.id, label: admin.name }],
+        hasAssignedManager: false,
+      };
+    }
+
+    return { approvers: [], hasAssignedManager: false };
   }
 
   private mapRequestToApi(
