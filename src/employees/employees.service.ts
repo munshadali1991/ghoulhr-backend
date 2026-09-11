@@ -809,12 +809,18 @@ export class EmployeesService {
         organizationId ?? savedEmployee.organizationId,
       );
 
-      if (basic.profilePhotoStorageKey && (organizationId ?? savedEmployee.organizationId)) {
+      const incomingPhotoKey = basic.profilePhotoStorageKey?.trim();
+      const currentPhotoKey = savedEmployee.profilePhotoStorageKey?.trim();
+      if (
+        incomingPhotoKey &&
+        incomingPhotoKey !== currentPhotoKey &&
+        (organizationId ?? savedEmployee.organizationId)
+      ) {
         const orgId = organizationId ?? savedEmployee.organizationId!;
         const finalPhotoKey = await this.storageService.finalizeProfilePhoto(
           orgId,
           savedEmployee.id,
-          basic.profilePhotoStorageKey,
+          incomingPhotoKey,
           basic.profilePhotoFileName || 'profile-photo.jpg',
         );
         savedEmployee.profilePhotoStorageKey = finalPhotoKey;
