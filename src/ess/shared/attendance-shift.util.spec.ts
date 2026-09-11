@@ -1,4 +1,5 @@
 import {
+  hasCompleteInOutPair,
   isOvernightShift,
   pairPunches,
   resolveShiftEndDate,
@@ -63,5 +64,21 @@ describe('resolveShiftEndDate', () => {
     const resolved = resolveShiftEndDate(start, end);
     expect(resolved?.getDate()).toBe(11);
     expect(resolved?.getHours()).toBe(6);
+  });
+});
+
+describe('hasCompleteInOutPair', () => {
+  it('is true when a pair has both in and out', () => {
+    expect(
+      hasCompleteInOutPair([
+        { in: new Date('2026-08-01T09:00:00Z'), out: new Date('2026-08-01T18:00:00Z') },
+      ]),
+    ).toBe(true);
+  });
+
+  it('is false for an open IN only', () => {
+    expect(hasCompleteInOutPair([{ in: new Date('2026-08-01T09:00:00Z') }])).toBe(
+      false,
+    );
   });
 });

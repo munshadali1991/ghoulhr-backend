@@ -246,3 +246,7 @@ export function pairPunches(
 
   return pairs.filter((pair) => dateKeyForInstant(pair.in) === workDateKey);
 }
+
+export function hasCompleteInOutPair(pairs: PunchPair[]): boolean {
+  return pairs.some((p) => Boolean(p.in && p.out));
+}

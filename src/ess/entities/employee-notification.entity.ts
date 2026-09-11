@@ -2,12 +2,16 @@ import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { BaseEntity } from '../../database/base.entity';
 import { Employee } from '../../employees/employee.entity';
 import { LeaveRequest } from './leave-request.entity';
+import { AttendanceRegularizationRequest } from './attendance-regularization-request.entity';
 
 export enum EmployeeNotificationType {
   LEAVE_APPLIED = 'LEAVE_APPLIED',
   LEAVE_PENDING_APPROVAL = 'LEAVE_PENDING_APPROVAL',
   LEAVE_APPROVED = 'LEAVE_APPROVED',
   LEAVE_REJECTED = 'LEAVE_REJECTED',
+  REGULARIZATION_PENDING_APPROVAL = 'REGULARIZATION_PENDING_APPROVAL',
+  REGULARIZATION_APPROVED = 'REGULARIZATION_APPROVED',
+  REGULARIZATION_REJECTED = 'REGULARIZATION_REJECTED',
 }
 
 @Entity({ name: 'employee_notifications' })
@@ -30,6 +34,13 @@ export class EmployeeNotification extends BaseEntity {
   @ManyToOne(() => LeaveRequest, { onDelete: 'SET NULL' })
   @JoinColumn({ name: 'leaveRequestId' })
   leaveRequest?: LeaveRequest;
+
+  @Column({ type: 'uuid', nullable: true })
+  attendanceRegularizationRequestId?: string | null;
+
+  @ManyToOne(() => AttendanceRegularizationRequest, { onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'attendanceRegularizationRequestId' })
+  attendanceRegularizationRequest?: AttendanceRegularizationRequest;
 
   @Column({ length: 64 })
   type: EmployeeNotificationType;

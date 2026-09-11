@@ -3,7 +3,7 @@ import {
   ConflictException,
   Injectable,
 } from '@nestjs/common';
-import { DataSource, Between, In } from 'typeorm';
+import { Between, DataSource, EntityManager, In } from 'typeorm';
 import { WorkShiftConfiguration } from '../../employees/entities/work-shift-configuration.entity';
 import { WorkShiftSession } from '../../employees/entities/work-shift-session.entity';
 import { LocationConfiguration } from '../../employees/entities/location-configuration.entity';
@@ -57,6 +57,7 @@ import {
   formatMinutesAsHhMm,
   formatProcessedAt,
   grossShiftSpanMinutes,
+  hasCompleteInOutPair,
   isOvernightShift,
   isRestDay,
   matchShiftByName,
@@ -92,6 +93,115 @@ export class EssAttendanceService {
 
   todayLocalDateKey(timezone?: string | null): string {
     return orgDateKeyForInstant(new Date(), timezone);
+  }
+
+  async getRegularizationContext(
+    em: DataSource | EntityManager,
+    organizationId: string,
+    employeeId: string,
+  ): Promise<{
+    timezone: string;
+    overnight: boolean;
+    today: string;
+    shift: WorkShiftConfiguration;
+  }> {
+    const shift = await this.requireEmployeeShift(em, organizationId, employeeId);
+    const { timezone } = await this.loadAttendancePolicy(em);
+    return {
+      timezone,
+      overnight: isOvernightShift(shift.startTime, shift.endTime),
+      today: this.todayLocalDateKey(timezone),
+      shift,
+    };
+  }
+
+  /**
+   * Write approved regularization IN/OUT punches and rebuild the daily summary.
+   */
+  async applyRegularizationPunches(
+    em: EntityManager,
+    organizationId: string,
+    employeeId: string,
+    workDate: string,
+    requestedInAt: Date,
+    requestedOutAt: Date,
+  ): Promise<void> {
+    const shift = await this.requireEmployeeShift(em, organizationId, employeeId);
+    const { timezone } = await this.loadAttendancePolicy(em);
+    const overnight = isOvernightShift(shift.startTime, shift.endTime);
+    const punches = await this.getPunchesForDay(
+      em,
+      organizationId,
+      employeeId,
+      workDate,
+      timezone,
+      { includeNextCalendarDay: overnight },
+    );
+    const pairs = pairPunches(punches, {
+      workDateKey: workDate,
+      dateKeyForInstant: (instant) => orgDateKeyForInstant(instant, timezone),
+    });
+    if (hasCompleteInOutPair(pairs)) {
+      throw new ConflictException(
+        'This day already has a complete check-in and check-out',
+      );
+    }
+
+    const punchRepo = em.getRepository(AttendancePunch);
+    await punchRepo.save([
+      punchRepo.create({
+        organizationId,
+        employeeId,
+        punchedAt: requestedInAt,
+        punchType: AttendancePunchType.IN,
+        source: 'REGULARIZATION',
+      }),
+      punchRepo.create({
+        organizationId,
+        employeeId,
+        punchedAt: requestedOutAt,
+        punchType: AttendancePunchType.OUT,
+        source: 'REGULARIZATION',
+      }),
+    ]);
+
+    await this.recomputeDailySummary(
+      em,
+      organizationId,
+      employeeId,
+      workDate,
+      shift,
+    );
+  }
+
+  async dayHasCompletePunchPair(
+    em: DataSource | EntityManager,
+    organizationId: string,
+    employeeId: string,
+    workDate: string,
+  ): Promise<boolean> {
+    const { timezone } = await this.loadAttendancePolicy(em);
+    const { shift } = await this.resolveEmployeeShift(
+      em,
+      organizationId,
+      employeeId,
+    );
+    const overnight = shift
+      ? isOvernightShift(shift.startTime, shift.endTime)
+      : false;
+    const punches = await this.getPunchesForDay(
+      em,
+      organizationId,
+      employeeId,
+      workDate,
+      timezone,
+      { includeNextCalendarDay: overnight },
+    );
+    const pairs = pairPunches(punches, {
+      workDateKey: workDate,
+      dateKeyForInstant: (instant) => orgDateKeyForInstant(instant, timezone),
+    });
+    return hasCompleteInOutPair(pairs);
   }
 
   private dayBoundsLocal(

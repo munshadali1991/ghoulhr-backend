@@ -107,7 +107,7 @@ These flows already exist in UI or API but **do not** send email yet. Prefer own
 | Admin password-reset email | Employees | [`POST /employees/:id/reset-password`](../../employees/employees.controller.ts) returns temp password in API only |
 | Org-admin provision welcome | Organizations / Employees | Org create with `adminEmail` provisions ORG_ADMIN; **no** `EmailService` call today |
 | Forgot-password / invite / verify-email | Auth (future) | Not implemented |
-| Attendance regularization reminder | ESS attendance (future) | Regularization approval workflow not built yet; month-end leave reminder is live |
+| Attendance regularization reminder | ESS attendance | In-app notifications live (`REGULARIZATION_PENDING_APPROVAL` / `_APPROVED` / `_REJECTED`); SES email not in this slice |
 
 ---
 

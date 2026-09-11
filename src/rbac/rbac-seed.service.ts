@@ -289,7 +289,8 @@ export class RbacSeedService {
       }
       if (
         codeList.includes('approvals.leave:read') ||
-        codeList.includes('approvals.timesheet:read')
+        codeList.includes('approvals.timesheet:read') ||
+        codeList.includes('approvals.attendance:read')
       ) {
         grants.push('dashboard.approvals:read');
       }
@@ -299,7 +300,8 @@ export class RbacSeedService {
       if (
         codeList.includes('employees:read') &&
         (codeList.includes('approvals.leave:act') ||
-          codeList.includes('approvals.timesheet:act'))
+          codeList.includes('approvals.timesheet:act') ||
+          codeList.includes('approvals.attendance:act'))
       ) {
         grants.push('dashboard.manager:read');
       }

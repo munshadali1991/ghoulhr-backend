@@ -5,6 +5,7 @@ import {
   Get,
   Header,
   Param,
+  ParseUUIDPipe,
   Post,
   Query,
   Req,
@@ -21,16 +22,22 @@ import { RequirePermissions } from '../../rbac/decorators/require-permissions.de
 import type { TenantRequest } from '../../common/middleware/tenant-resolver.middleware';
 import { GetYearMonthQueryDto } from '../dto/get-year-month-query.dto';
 import { EssAttendanceService } from './ess-attendance.service';
+import { EssAttendanceRegularizationService } from './ess-attendance-regularization.service';
 import { SignInPunchDto, SignPunchDto } from './dto/sign-punch.dto';
 import { GetWhoIsInQueryDto } from './dto/get-who-is-in-query.dto';
 import { GetEmployeeSwipesQueryDto } from './dto/get-employee-swipes-query.dto';
+import { CreateAttendanceRegularizationDto } from './dto/create-attendance-regularization.dto';
+import { GetAttendanceRegularizationQueryDto } from './dto/get-attendance-regularization-query.dto';
 
 @ApiTags('ESS Attendance')
 @ApiBearerAuth()
 @UseGuards(TenantAuthGuard, SubscriptionGuard, PermissionsGuard)
 @Controller('ess/attendance')
 export class EssAttendanceController {
-  constructor(private readonly attendanceService: EssAttendanceService) {}
+  constructor(
+    private readonly attendanceService: EssAttendanceService,
+    private readonly regularizationService: EssAttendanceRegularizationService,
+  ) {}
 
   @Post('sign-in')
   @RequirePermissions('ess.attendance:punch')
@@ -58,6 +65,51 @@ export class EssAttendanceController {
       dto.latitude,
       dto.longitude,
       this.resolveClientIp(req),
+    );
+  }
+
+  @Get('regularization')
+  @RequirePermissions('ess.attendance.regularization:apply')
+  @ApiOperation({ summary: 'List own attendance regularization requests' })
+  listRegularization(
+    @Req() req: TenantRequest,
+    @Query() query: GetAttendanceRegularizationQueryDto,
+  ) {
+    return this.regularizationService.listOwn(
+      req.tenantDataSource!,
+      req.organization!.id,
+      req.user!.sub,
+      query.status,
+    );
+  }
+
+  @Post('regularization')
+  @RequirePermissions('ess.attendance.regularization:apply')
+  @ApiOperation({ summary: 'Submit an attendance regularization request' })
+  createRegularization(
+    @Req() req: TenantRequest,
+    @Body() dto: CreateAttendanceRegularizationDto,
+  ) {
+    return this.regularizationService.create(
+      req.tenantDataSource!,
+      req.organization!.id,
+      req.user!.sub,
+      dto,
+    );
+  }
+
+  @Post('regularization/:id/withdraw')
+  @RequirePermissions('ess.attendance.regularization:apply')
+  @ApiOperation({ summary: 'Withdraw a pending attendance regularization request' })
+  withdrawRegularization(
+    @Req() req: TenantRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.regularizationService.withdraw(
+      req.tenantDataSource!,
+      req.organization!.id,
+      req.user!.sub,
+      id,
     );
   }
 

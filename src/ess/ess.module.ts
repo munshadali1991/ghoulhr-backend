@@ -7,6 +7,7 @@ import { DatabaseCoreModule } from '../core/database/database-core.module';
 import { FieldEncryptionService } from '../common/services/field-encryption.service';
 import { EssAttendanceController } from './attendance/ess-attendance.controller';
 import { EssAttendanceService } from './attendance/ess-attendance.service';
+import { EssAttendanceRegularizationService } from './attendance/ess-attendance-regularization.service';
 import { EssLeaveCalendarController } from './calendar/ess-leave-calendar.controller';
 import { EssLeaveCalendarService } from './calendar/ess-leave-calendar.service';
 import { EssHolidaysController } from './holidays/ess-holidays.controller';
@@ -57,6 +58,7 @@ import { PerformanceMasterService } from './performance/performance-master.servi
     EssLeaveCalendarService,
     EssHolidaysService,
     EssAttendanceService,
+    EssAttendanceRegularizationService,
     EssHomeService,
     EssNotificationsService,
     EssTimesheetService,
