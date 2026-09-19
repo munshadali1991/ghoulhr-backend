@@ -19,10 +19,10 @@ describe('permissionModuleCode', () => {
     expect(permissionModuleCode('documents:write')).toBe('documents');
   });
 
-  it('maps ess skills to employees module', () => {
-    expect(permissionModuleCode('ess.skills:read')).toBe('employees');
-    expect(permissionModuleCode('ess.skills:write')).toBe('employees');
-    expect(permissionModuleCode('settings.skills:write')).toBe('settings');
-    expect(permissionModuleCode('employees.skills:read')).toBe('employees');
+  it('maps expense permissions to expense module', () => {
+    expect(permissionModuleCode('ess.expense:apply')).toBe('expense');
+    expect(permissionModuleCode('settings.expense:write')).toBe('expense');
+    expect(permissionModuleCode('expense.finance:act')).toBe('expense');
+    expect(permissionModuleCode('approvals.expense:read')).toBe('approvals');
   });
 });

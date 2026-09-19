@@ -34,6 +34,10 @@ export class Employee extends BaseEntity {
   @Index({ unique: true })
   employeeCode: string;
 
+  /** Integer PIN on wall biometric devices (not a biometric template). */
+  @Column({ type: 'int', nullable: true })
+  biometricId?: number | null;
+
   @Column()
   name: string;
 

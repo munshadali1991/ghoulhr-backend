@@ -486,12 +486,22 @@ export class SettingsService {
       [SETTING_KEYS.ATTENDANCE_TRACKING_MODE]: 'tracking_mode',
       [SETTING_KEYS.ATTENDANCE_GEO_FENCING_ENABLED]: 'geo_fencing_enabled',
       [SETTING_KEYS.ATTENDANCE_ALLOWED_IPS]: 'allowed_ip_addresses',
+      [SETTING_KEYS.ATTENDANCE_PUNCH_DIRECTION_MODE]: 'punch_direction_mode',
+      [SETTING_KEYS.ATTENDANCE_BIOMETRIC_DEDUPE_WINDOW_SECONDS]:
+        'biometric_dedupe_window_seconds',
     };
 
     for (const setting of allSettings) {
       if (mapping[setting.key]) {
         attendanceSettings[mapping[setting.key]] = setting.value;
       }
+    }
+
+    if (attendanceSettings.punch_direction_mode == null) {
+      attendanceSettings.punch_direction_mode = 'smart_shift';
+    }
+    if (attendanceSettings.biometric_dedupe_window_seconds == null) {
+      attendanceSettings.biometric_dedupe_window_seconds = 120;
     }
 
     attendanceSettings.shifts = await this.resolveShifts(
@@ -694,6 +704,9 @@ export class SettingsService {
       tracking_mode: SETTING_KEYS.ATTENDANCE_TRACKING_MODE,
       geo_fencing_enabled: SETTING_KEYS.ATTENDANCE_GEO_FENCING_ENABLED,
       allowed_ip_addresses: SETTING_KEYS.ATTENDANCE_ALLOWED_IPS,
+      punch_direction_mode: SETTING_KEYS.ATTENDANCE_PUNCH_DIRECTION_MODE,
+      biometric_dedupe_window_seconds:
+        SETTING_KEYS.ATTENDANCE_BIOMETRIC_DEDUPE_WINDOW_SECONDS,
     };
 
     for (const [field, key] of Object.entries(mapping)) {

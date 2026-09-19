@@ -19,8 +19,8 @@ export class GetLeaveCalendarQueryDto {
   @Max(12)
   month?: number;
 
-  @ApiPropertyOptional({ enum: ['me', 'team'], default: 'me' })
+  @ApiPropertyOptional({ enum: ['me', 'team', 'organization'], default: 'me' })
   @IsOptional()
-  @IsIn(['me', 'team'])
-  filter?: 'me' | 'team';
+  @IsIn(['me', 'team', 'organization'])
+  filter?: 'me' | 'team' | 'organization';
 }

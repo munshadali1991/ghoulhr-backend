@@ -9,6 +9,7 @@ export type StorageCategory = (typeof STORAGE_CATEGORIES)[number];
 export const STORAGE_MODULES = [
   'onboarding',
   'leave',
+  'expense',
   'profile-photos',
   'branding',
   'document-centre',

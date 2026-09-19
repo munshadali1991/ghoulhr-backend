@@ -9,6 +9,9 @@ import { DataSource } from 'typeorm';
 import { FieldEncryptionService } from '../common/services/field-encryption.service';
 import { Employee } from '../employees/employee.entity';
 import { EmployeeDocument } from '../employees/entities/employee-document.entity';
+import { isOnboardingDocumentType } from '../employees/constants/onboarding-document-types';
+import { ExpenseReceipt } from '../ess/entities/expense-receipt.entity';
+import { LeaveAttachment } from '../ess/entities/leave-attachment.entity';
 import { OrganizationSetting } from '../settings/entities/organization-setting.entity';
 import { SETTING_KEYS } from '../settings/settings.constants';
 import { S3StorageService } from './s3-storage.service';
@@ -81,6 +84,19 @@ export class StorageService {
       }
     }
 
+    if (dto.module === 'expense') {
+      if (!dto.employeeId) {
+        throw new BadRequestException(
+          'employeeId is required for expense uploads',
+        );
+      }
+      if (dto.employeeId !== actorEmployeeId) {
+        throw new ForbiddenException(
+          'You can only upload expense receipts for your own employee record',
+        );
+      }
+    }
+
     if (dto.module === 'profile-photos' && !dto.employeeId && !dto.uploadBatchId) {
       throw new BadRequestException(
         'employeeId or uploadBatchId is required for profile photo uploads',
@@ -104,7 +120,12 @@ export class StorageService {
       return;
     }
 
-    if (module === 'onboarding' || module === 'leave' || module === 'profile-photos') {
+    if (
+      module === 'onboarding' ||
+      module === 'leave' ||
+      module === 'expense' ||
+      module === 'profile-photos'
+    ) {
       if (dto.category !== 'employee-documents' && dto.category !== 'staging') {
         throw new BadRequestException(
           'Employee uploads must use employee-documents or staging category',
@@ -153,6 +174,7 @@ export class StorageService {
       module: dto.module,
       employeeId: dto.employeeId,
       leaveRequestId: dto.leaveRequestId,
+      expenseClaimId: dto.expenseClaimId,
       documentType: dto.documentType,
       uploadBatchId: dto.uploadBatchId,
       originalFileName: file.originalname,
@@ -245,6 +267,35 @@ export class StorageService {
     return finalKey;
   }
 
+  async finalizeExpenseReceipt(
+    organizationId: string,
+    employeeId: string,
+    expenseClaimId: string,
+    sourceKey: string,
+    fileName: string,
+  ): Promise<string> {
+    if (!this.s3Storage.isOrganizationKey(sourceKey, organizationId)) {
+      throw new BadRequestException('Invalid expense receipt storage key');
+    }
+
+    const { storageKey: finalKey } = this.s3Storage.buildObjectKey({
+      organizationId,
+      category: 'employee-documents',
+      module: 'expense',
+      employeeId,
+      expenseClaimId,
+      documentType: 'EXPENSE_RECEIPT',
+      originalFileName: fileName,
+    });
+
+    if (sourceKey !== finalKey) {
+      await this.s3Storage.copyObject(sourceKey, finalKey);
+      await this.s3Storage.deleteObject(sourceKey);
+    }
+
+    return finalKey;
+  }
+
   async finalizeProfilePhoto(
     organizationId: string,
     employeeId: string,
@@ -287,7 +338,7 @@ export class StorageService {
       where: { id: documentId },
       relations: ['employee'],
     });
-    if (!doc) {
+    if (!doc || !isOnboardingDocumentType(doc.documentType)) {
       throw new NotFoundException('Document not found');
     }
 
@@ -297,27 +348,117 @@ export class StorageService {
       throw new ForbiddenException('Document not found');
     }
 
-    if (doc.storageDriver === STORAGE_DRIVERS.S3 && doc.storageKey) {
-      if (!this.s3Storage.isOrganizationKey(doc.storageKey, organizationId)) {
-        throw new ForbiddenException('Document not found');
-      }
-      const url = await this.s3Storage.getSignedDownloadUrl(
-        doc.storageKey,
-        doc.fileName,
-        doc.mimeType,
-      );
-      return { mode: 'signedUrl', url, fileName: doc.fileName, mimeType: doc.mimeType };
+    return this.resolveStoredFileDownload(organizationId, doc, 'download');
+  }
+
+  async getDocumentPreview(
+    dataSource: DataSource,
+    organizationId: string,
+    documentId: string,
+  ): Promise<
+    | { mode: 'signedUrl'; url: string; fileName: string; mimeType: string }
+    | { mode: 'inline'; fileName: string; mimeType: string; dataBase64: string }
+  > {
+    const doc = await dataSource.getRepository(EmployeeDocument).findOne({
+      where: { id: documentId },
+      relations: ['employee'],
+    });
+    if (!doc || !isOnboardingDocumentType(doc.documentType)) {
+      throw new NotFoundException('Document not found');
     }
 
-    if (doc.storageDriver === STORAGE_DRIVERS.INLINE_BASE64 && doc.payloadEnc) {
-      const decrypted = this.fieldEncryption.decrypt(doc.payloadEnc);
+    const employeeOrgId = (doc.employee as { organizationId?: string })
+      ?.organizationId;
+    if (employeeOrgId && employeeOrgId !== organizationId) {
+      throw new ForbiddenException('Document not found');
+    }
+
+    return this.resolveStoredFileDownload(organizationId, doc, 'preview');
+  }
+
+  async getExpenseReceiptDownload(
+    dataSource: DataSource,
+    organizationId: string,
+    receiptId: string,
+    mode: 'download' | 'preview' = 'download',
+  ): Promise<
+    | { mode: 'signedUrl'; url: string; fileName: string; mimeType: string }
+    | { mode: 'inline'; fileName: string; mimeType: string; dataBase64: string }
+  > {
+    const receipt = await dataSource.getRepository(ExpenseReceipt).findOne({
+      where: { id: receiptId, organizationId },
+    });
+    if (!receipt) {
+      throw new NotFoundException('Document not found');
+    }
+    return this.resolveStoredFileDownload(organizationId, receipt, mode);
+  }
+
+  async getLeaveAttachmentDownload(
+    dataSource: DataSource,
+    organizationId: string,
+    attachmentId: string,
+    mode: 'download' | 'preview' = 'download',
+  ): Promise<
+    | { mode: 'signedUrl'; url: string; fileName: string; mimeType: string }
+    | { mode: 'inline'; fileName: string; mimeType: string; dataBase64: string }
+  > {
+    const attachment = await dataSource.getRepository(LeaveAttachment).findOne({
+      where: { id: attachmentId, organizationId },
+    });
+    if (!attachment) {
+      throw new NotFoundException('Document not found');
+    }
+    return this.resolveStoredFileDownload(organizationId, attachment, mode);
+  }
+
+  private async resolveStoredFileDownload(
+    organizationId: string,
+    file: {
+      fileName: string;
+      mimeType: string;
+      storageDriver: string;
+      storageKey?: string | null;
+      payloadEnc?: string | null;
+    },
+    mode: 'download' | 'preview',
+  ): Promise<
+    | { mode: 'signedUrl'; url: string; fileName: string; mimeType: string }
+    | { mode: 'inline'; fileName: string; mimeType: string; dataBase64: string }
+  > {
+    if (file.storageDriver === STORAGE_DRIVERS.S3 && file.storageKey) {
+      if (!this.s3Storage.isOrganizationKey(file.storageKey, organizationId)) {
+        throw new ForbiddenException('Document not found');
+      }
+      const url =
+        mode === 'preview'
+          ? await this.s3Storage.getSignedPreviewUrl(
+              file.storageKey,
+              file.mimeType,
+              file.fileName,
+            )
+          : await this.s3Storage.getSignedDownloadUrl(
+              file.storageKey,
+              file.fileName,
+              file.mimeType,
+            );
+      return {
+        mode: 'signedUrl',
+        url,
+        fileName: file.fileName,
+        mimeType: file.mimeType,
+      };
+    }
+
+    if (file.storageDriver === STORAGE_DRIVERS.INLINE_BASE64 && file.payloadEnc) {
+      const decrypted = this.fieldEncryption.decrypt(file.payloadEnc);
       if (!decrypted) {
         throw new NotFoundException('Document could not be read');
       }
       return {
         mode: 'inline',
-        fileName: doc.fileName,
-        mimeType: doc.mimeType,
+        fileName: file.fileName,
+        mimeType: file.mimeType,
         dataBase64: decrypted,
       };
     }
@@ -423,6 +564,26 @@ export class StorageService {
         )
         .execute();
       documentReferencesCleared = docUpdate.affected ?? 0;
+
+      const expenseReceiptUpdate = await em
+        .getRepository(ExpenseReceipt)
+        .createQueryBuilder()
+        .update()
+        .set({ storageKey: null })
+        .where('"organizationId" = :orgId', { orgId: organizationId })
+        .andWhere('"storageDriver" = :driver', { driver: STORAGE_DRIVERS.S3 })
+        .execute();
+      documentReferencesCleared += expenseReceiptUpdate.affected ?? 0;
+
+      const leaveAttachmentUpdate = await em
+        .getRepository(LeaveAttachment)
+        .createQueryBuilder()
+        .update()
+        .set({ storageKey: null })
+        .where('"organizationId" = :orgId', { orgId: organizationId })
+        .andWhere('"storageDriver" = :driver', { driver: STORAGE_DRIVERS.S3 })
+        .execute();
+      documentReferencesCleared += leaveAttachmentUpdate.affected ?? 0;
 
       const photoUpdate = await em
         .getRepository(Employee)

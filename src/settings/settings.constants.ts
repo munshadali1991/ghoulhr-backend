@@ -21,11 +21,17 @@ export const SETTING_KEYS = {
   ATTENDANCE_TRACKING_MODE: 'attendance.tracking_mode',
   ATTENDANCE_GEO_FENCING_ENABLED: 'attendance.geo_fencing_enabled',
   ATTENDANCE_ALLOWED_IPS: 'attendance.allowed_ip_addresses',
+  ATTENDANCE_PUNCH_DIRECTION_MODE: 'attendance.punch_direction_mode',
+  ATTENDANCE_BIOMETRIC_DEDUPE_WINDOW_SECONDS:
+    'attendance.biometric_dedupe_window_seconds',
   TIMESHEET_MAX_HOURS_PER_DAY: 'timesheet.max_hours_per_day',
   TIMESHEET_MAX_PAST_DAYS: 'timesheet.max_past_days',
   TIMESHEET_REQUIRE_SUBMISSION_BY_EOD: 'timesheet.require_submission_by_eod',
   TIMESHEET_EMPLOYEE_HELPER_TEXT: 'timesheet.employee_helper_text',
   TIMESHEET_WEEK_STARTS_ON: 'timesheet.week_starts_on',
+  EXPENSE_DEFAULT_CLAIM_WINDOW_DAYS: 'expense.default_claim_window_days',
+  EXPENSE_MAX_LINES_PER_CLAIM: 'expense.max_lines_per_claim',
+  EXPENSE_MAX_CLAIM_AMOUNT: 'expense.max_claim_amount',
 } as const;
 
 export const SUPPORTED_CURRENCIES = ['INR', 'USD', 'EUR', 'GBP'] as const;
@@ -93,6 +99,13 @@ export const VALID_TRACKING_MODES = [
   'ip',
 ] as const;
 
+export const VALID_PUNCH_DIRECTION_MODES = [
+  'smart_shift',
+  'strict',
+] as const;
+
+export const DEFAULT_BIOMETRIC_DEDUPE_WINDOW_SECONDS = 120;
+
 /** First-segment /settings/:key values that are real feature routes, not KV setting keys. */
 export const RESERVED_SETTING_PATH_KEYS = [
   'profile',
@@ -101,10 +114,13 @@ export const RESERVED_SETTING_PATH_KEYS = [
   'departments',
   'designations',
   'attendance',
+  'biometric',
   'timesheet',
   'locations',
   'leave-config',
   'leave',
+  'expense',
+  'expense-config',
   'organization',
   'performance',
   'skills',

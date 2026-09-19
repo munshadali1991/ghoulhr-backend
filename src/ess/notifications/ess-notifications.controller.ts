@@ -25,7 +25,12 @@ export class EssNotificationsController {
   ) {}
 
   @Get()
-  @RequireAnyPermission('ess.leave:read', 'ess.attendance:read', 'ess.timesheet:read')
+  @RequireAnyPermission(
+    'ess.leave:read',
+    'ess.attendance:read',
+    'ess.timesheet:read',
+    'ess.expense:read',
+  )
   @ApiOperation({ summary: 'List notifications for the signed-in employee' })
   list(@Req() req: TenantRequest) {
     return this.essNotificationsService.list(
@@ -36,7 +41,12 @@ export class EssNotificationsController {
   }
 
   @Get('unread-count')
-  @RequireAnyPermission('ess.leave:read', 'ess.attendance:read', 'ess.timesheet:read')
+  @RequireAnyPermission(
+    'ess.leave:read',
+    'ess.attendance:read',
+    'ess.timesheet:read',
+    'ess.expense:read',
+  )
   @ApiOperation({ summary: 'Unread notification count for header badge' })
   unreadCount(@Req() req: TenantRequest) {
     return this.essNotificationsService.getUnreadCount(
@@ -47,7 +57,12 @@ export class EssNotificationsController {
   }
 
   @Patch('read-all')
-  @RequireAnyPermission('ess.leave:read', 'ess.attendance:read', 'ess.timesheet:read')
+  @RequireAnyPermission(
+    'ess.leave:read',
+    'ess.attendance:read',
+    'ess.timesheet:read',
+    'ess.expense:read',
+  )
   @ApiOperation({ summary: 'Mark all notifications as read' })
   markAllRead(@Req() req: TenantRequest) {
     return this.essNotificationsService.markAllRead(
@@ -58,7 +73,12 @@ export class EssNotificationsController {
   }
 
   @Patch(':id/read')
-  @RequireAnyPermission('ess.leave:read', 'ess.attendance:read', 'ess.timesheet:read')
+  @RequireAnyPermission(
+    'ess.leave:read',
+    'ess.attendance:read',
+    'ess.timesheet:read',
+    'ess.expense:read',
+  )
   @ApiOperation({ summary: 'Mark a single notification as read' })
   markRead(
     @Req() req: TenantRequest,

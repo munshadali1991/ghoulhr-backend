@@ -13,6 +13,9 @@ import { SkillCategory } from '../../skills/entities/skill-category.entity';
 import { SkillSubcategory } from '../../skills/entities/skill-subcategory.entity';
 import { Skill } from '../../skills/entities/skill.entity';
 import { EmployeeSkill } from '../../skills/entities/employee-skill.entity';
+import { BiometricDevice } from '../../biometric/entities/biometric-device.entity';
+import { BiometricUnmappedPunch } from '../../biometric/entities/biometric-unmapped-punch.entity';
+import { BiometricAuditLog } from '../../biometric/entities/biometric-audit-log.entity';
 
 @Injectable()
 export class TenantConnectionManager implements OnModuleDestroy {
@@ -175,6 +178,7 @@ export class TenantConnectionManager implements OnModuleDestroy {
         __dirname + '/../../settings/entities/*.entity{.ts,.js}',
         __dirname + '/../../ess/entities/*.entity{.ts,.js}',
         __dirname + '/../../skills/entities/*.entity{.ts,.js}',
+        __dirname + '/../../biometric/entities/*.entity{.ts,.js}',
         // Explicit classes — globs alone can miss new folders until rebuild/cache refresh.
         DocumentCentreDocument,
         DocumentCentreUploadBatch,
@@ -182,6 +186,9 @@ export class TenantConnectionManager implements OnModuleDestroy {
         SkillSubcategory,
         Skill,
         EmployeeSkill,
+        BiometricDevice,
+        BiometricUnmappedPunch,
+        BiometricAuditLog,
         // Tenant RBAC only — exclude master-catalog entities (PlatformModule, OrganizationModuleEntitlement).
         RbacRole,
         RbacPermission,

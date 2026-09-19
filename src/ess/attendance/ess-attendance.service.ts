@@ -768,6 +768,239 @@ export class EssAttendanceService {
     return open;
   }
 
+  /**
+   * Persist a device/hardware punch using the device event timestamp.
+   * Shared by ZKTeco ADMS ingest (and future adapters).
+   */
+  async ingestDevicePunch(
+    dataSource: DataSource,
+    input: {
+      organizationId: string;
+      employeeId: string;
+      punchedAt: Date;
+      punchType?: AttendancePunchType | null;
+      directionMode: 'smart_shift' | 'strict';
+      source?: string;
+      deviceId?: string | null;
+      deviceSerial?: string | null;
+      hardwareUserId?: number | null;
+      externalEventKey?: string | null;
+      dedupeWindowSeconds?: number;
+      rawPunchType?: string | null;
+    },
+  ): Promise<{
+    accepted: boolean;
+    duplicate: boolean;
+    punchId?: string;
+    punchType?: AttendancePunchType;
+  }> {
+    return dataSource.transaction(async (em) => {
+      const punchRepo = em.getRepository(AttendancePunch);
+
+      if (input.externalEventKey) {
+        const existingKey = await punchRepo.findOne({
+          where: {
+            organizationId: input.organizationId,
+            externalEventKey: input.externalEventKey,
+          },
+        });
+        if (existingKey) {
+          return { accepted: true, duplicate: true, punchId: existingKey.id };
+        }
+      }
+
+      const windowSec = Math.max(0, input.dedupeWindowSeconds ?? 120);
+      if (windowSec > 0) {
+        const windowStart = new Date(
+          input.punchedAt.getTime() - windowSec * 1000,
+        );
+        const recent = await punchRepo
+          .createQueryBuilder('p')
+          .where('p.organizationId = :organizationId', {
+            organizationId: input.organizationId,
+          })
+          .andWhere('p.employeeId = :employeeId', {
+            employeeId: input.employeeId,
+          })
+          .andWhere('p.source = :source', {
+            source: input.source ?? 'BIOMETRIC',
+          })
+          .andWhere('p.punchedAt >= :windowStart', { windowStart })
+          .andWhere('p.punchedAt <= :punchedAt', {
+            punchedAt: input.punchedAt,
+          })
+          .andWhere('p.deletedAt IS NULL')
+          .orderBy('p.punchedAt', 'DESC')
+          .getOne();
+        if (recent) {
+          return { accepted: true, duplicate: true, punchId: recent.id };
+        }
+      }
+
+      const policy = await this.loadAttendancePolicy(em);
+      const shift = await this.requireEmployeeShift(
+        em,
+        input.organizationId,
+        input.employeeId,
+      );
+
+      const punchType = await this.resolveDevicePunchType(em, {
+        organizationId: input.organizationId,
+        employeeId: input.employeeId,
+        punchedAt: input.punchedAt,
+        timezone: policy.timezone,
+        shift,
+        directionMode: input.directionMode,
+        punchType: input.punchType,
+        rawPunchType: input.rawPunchType,
+      });
+
+      const workDate = await this.resolveWorkDateForDevicePunch(
+        em,
+        input.organizationId,
+        input.employeeId,
+        input.punchedAt,
+        policy.timezone,
+        shift,
+      );
+
+      const saved = await punchRepo.save(
+        punchRepo.create({
+          organizationId: input.organizationId,
+          employeeId: input.employeeId,
+          punchedAt: input.punchedAt,
+          punchType,
+          source: input.source ?? 'BIOMETRIC',
+          deviceId: input.deviceId ?? null,
+          deviceSerial: input.deviceSerial ?? null,
+          hardwareUserId: input.hardwareUserId ?? null,
+          externalEventKey: input.externalEventKey ?? null,
+        }),
+      );
+
+      await this.recomputeDailySummary(
+        em,
+        input.organizationId,
+        input.employeeId,
+        workDate,
+        shift,
+      );
+
+      return {
+        accepted: true,
+        duplicate: false,
+        punchId: saved.id,
+        punchType,
+      };
+    });
+  }
+
+  private mapStrictPunchType(
+    raw?: string | null,
+    explicit?: AttendancePunchType | null,
+  ): AttendancePunchType | null {
+    if (explicit === AttendancePunchType.IN || explicit === AttendancePunchType.OUT) {
+      return explicit;
+    }
+    if (raw == null || raw === '') return null;
+    const n = String(raw).trim().toUpperCase();
+    if (n === '0' || n === 'IN' || n === 'CHECKIN' || n === 'I') {
+      return AttendancePunchType.IN;
+    }
+    if (n === '1' || n === 'OUT' || n === 'CHECKOUT' || n === 'O') {
+      return AttendancePunchType.OUT;
+    }
+    return null;
+  }
+
+  private async resolveDevicePunchType(
+    em: EntityManager,
+    args: {
+      organizationId: string;
+      employeeId: string;
+      punchedAt: Date;
+      timezone: string;
+      shift: WorkShiftConfiguration;
+      directionMode: 'smart_shift' | 'strict';
+      punchType?: AttendancePunchType | null;
+      rawPunchType?: string | null;
+    },
+  ): Promise<AttendancePunchType> {
+    if (args.directionMode === 'strict') {
+      const mapped = this.mapStrictPunchType(args.rawPunchType, args.punchType);
+      if (mapped) return mapped;
+    }
+
+    const open = await this.hasOpenSessionAt(
+      em,
+      args.organizationId,
+      args.employeeId,
+      args.punchedAt,
+      args.timezone,
+      args.shift,
+    );
+    return open ? AttendancePunchType.OUT : AttendancePunchType.IN;
+  }
+
+  private async resolveWorkDateForDevicePunch(
+    em: EntityManager,
+    organizationId: string,
+    employeeId: string,
+    punchedAt: Date,
+    timezone: string,
+    shift: WorkShiftConfiguration,
+  ): Promise<string> {
+    const calendarDay = orgDateKeyForInstant(punchedAt, timezone);
+    const overnight = isOvernightShift(shift.startTime, shift.endTime);
+    if (!overnight) return calendarDay;
+
+    const prevDay = addCalendarDays(calendarDay, -1);
+    for (const workDate of [prevDay, calendarDay]) {
+      const punches = await this.getPunchesForDay(
+        em,
+        organizationId,
+        employeeId,
+        workDate,
+        timezone,
+        { includeNextCalendarDay: true },
+      );
+      const prior = punches.filter((p) => p.punchedAt.getTime() < punchedAt.getTime());
+      if (this.hasOpenSession(prior)) {
+        return workDate;
+      }
+    }
+    return calendarDay;
+  }
+
+  private async hasOpenSessionAt(
+    em: EntityManager,
+    organizationId: string,
+    employeeId: string,
+    punchedAt: Date,
+    timezone: string,
+    shift: WorkShiftConfiguration,
+  ): Promise<boolean> {
+    const workDate = await this.resolveWorkDateForDevicePunch(
+      em,
+      organizationId,
+      employeeId,
+      punchedAt,
+      timezone,
+      shift,
+    );
+    const overnight = isOvernightShift(shift.startTime, shift.endTime);
+    const punches = await this.getPunchesForDay(
+      em,
+      organizationId,
+      employeeId,
+      workDate,
+      timezone,
+      { includeNextCalendarDay: overnight },
+    );
+    const prior = punches.filter((p) => p.punchedAt.getTime() < punchedAt.getTime());
+    return this.hasOpenSession(prior);
+  }
+
   private async recomputeDailySummary(
     em: import('typeorm').EntityManager,
     organizationId: string,
@@ -1840,14 +2073,19 @@ function mapSwipeRow(
   const name = emp?.name ?? 'Employee';
   const punchType = punch.punchType;
   const isIn = punchType === AttendancePunchType.IN;
+  const sourceUpper = String(punch.source ?? 'WEB').toUpperCase();
   const sourceLabel =
-    String(punch.source ?? 'WEB').toUpperCase() === 'WEB'
+    sourceUpper === 'WEB'
       ? isIn
         ? 'Web sign in'
         : 'Web sign out'
-      : isIn
-        ? 'Sign in'
-        : 'Sign out';
+      : sourceUpper === 'BIOMETRIC'
+        ? isIn
+          ? 'Biometric sign in'
+          : 'Biometric sign out'
+        : isIn
+          ? 'Sign in'
+          : 'Sign out';
 
   const punchedAt =
     punch.punchedAt instanceof Date
@@ -1875,10 +2113,11 @@ function mapSwipeRow(
     sourceLabel,
     shiftName: opts.shiftName,
     doorAddress: null as string | null,
-    deviceName: null as string | null,
-    accessCard: null as string | null,
+    deviceName: punch.deviceSerial ?? null,
+    accessCard:
+      punch.hardwareUserId != null ? String(punch.hardwareUserId) : null,
     remarks: null as string | null,
-    deviceId: null as string | null,
+    deviceId: punch.deviceId ?? null,
     locationSummary: isIn
       ? signInLocationLabel(punch.signInLocation)
       : null,

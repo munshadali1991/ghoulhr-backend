@@ -28,7 +28,9 @@ import { daysInMonth } from '../shared/ess-format.util';
 
 export const TEAM_ON_LEAVE_PERMISSION = 'dashboard.ess.team-on-leave:read';
 
-const CHART_MAX_RANGE_DAYS = 31;
+export type LeaveCalendarFilter = 'me' | 'team' | 'organization';
+
+const CHART_MAX_RANGE_DAYS = 366;
 const RESTRICTED_HOLIDAY_SERIES_KEY = 'restricted-holiday';
 const RESTRICTED_HOLIDAY_LABEL = 'Restricted Holiday';
 
@@ -41,7 +43,7 @@ export interface LeaveCalendarDayMarker {
   date: string;
   holiday?: 'general' | 'restricted';
   onLeave?: boolean;
-  /** Unique people on leave that day (team or self filter). */
+  /** Unique people on leave that day (me / team / organization). */
   onLeaveCount?: number;
 }
 
@@ -73,7 +75,7 @@ export class EssLeaveCalendarService {
     employeeId: string,
     year: number | undefined,
     month: number | undefined,
-    filter: 'me' | 'team',
+    filter: LeaveCalendarFilter,
   ) {
     const profile = await this.settingsService.getOrgProfile(dataSource);
     const timezone = resolveOrgTimezone(profile.timezone);
@@ -133,8 +135,22 @@ export class EssLeaveCalendarService {
         statuses: [LeaveRequestStatus.APPROVED],
       });
 
+      const activeEmployeeIds =
+        filter === 'organization'
+          ? await this.filterVisibleRosterEmployeeIds(
+              dataSource,
+              leaveRows.map((r) => r.employeeId),
+            )
+          : null;
+
       for (const row of leaveRows) {
         if (filter === 'team' && row.employeeId === employeeId) continue;
+        if (
+          activeEmployeeIds !== null &&
+          !activeEmployeeIds.has(row.employeeId)
+        ) {
+          continue;
+        }
 
         const start = toDateKey(row.startDate);
         const end = toDateKey(row.endDate);
@@ -164,13 +180,16 @@ export class EssLeaveCalendarService {
       }
     }
 
+    const showRosterCount =
+      filter === 'team' || filter === 'organization';
+
     return {
       year: resolvedYear,
       month: resolvedMonth,
       filter,
       timezone,
       days,
-      teamOnLeaveCount: filter === 'team' ? teamOnLeaveIds.size : 0,
+      teamOnLeaveCount: showRosterCount ? teamOnLeaveIds.size : 0,
     };
   }
 
@@ -179,7 +198,7 @@ export class EssLeaveCalendarService {
     organizationId: string,
     employeeId: string,
     date: string,
-    filter: 'me' | 'team',
+    filter: LeaveCalendarFilter,
     search?: string,
   ) {
     const employeeIds = await this.resolveCalendarEmployeeIds(
@@ -202,10 +221,27 @@ export class EssLeaveCalendarService {
       relations: ['employee', 'leaveConfiguration'],
     });
 
+    const activeEmployeeIds =
+      filter === 'organization'
+        ? await this.filterVisibleRosterEmployeeIds(
+            dataSource,
+            leaveRows.map((r) => r.employeeId),
+          )
+        : null;
+
     const empIdsForMeta = [
       ...new Set(
         leaveRows
-          .filter((r) => !(filter === 'team' && r.employeeId === employeeId))
+          .filter((r) => {
+            if (filter === 'team' && r.employeeId === employeeId) return false;
+            if (
+              activeEmployeeIds !== null &&
+              !activeEmployeeIds.has(r.employeeId)
+            ) {
+              return false;
+            }
+            return true;
+          })
           .map((r) => r.employeeId),
       ),
     ];
@@ -234,6 +270,12 @@ export class EssLeaveCalendarService {
     const items = [];
     for (const row of leaveRows) {
       if (filter === 'team' && row.employeeId === employeeId) continue;
+      if (
+        activeEmployeeIds !== null &&
+        !activeEmployeeIds.has(row.employeeId)
+      ) {
+        continue;
+      }
 
       const start = toDateKey(row.startDate);
       const end = toDateKey(row.endDate);
@@ -905,16 +947,18 @@ export class EssLeaveCalendarService {
   }
 
   /**
-   * Me = self only. Team = same RBAC roster as Team On Leave
-   * (null = org-wide, [] = empty, string[] = scoped peers).
+   * Me = self only.
+   * Team = same RBAC roster as Team On Leave (null = org-wide, [] = empty, string[] = scoped peers).
+   * Organization = full tenant org (null), including the viewer; inactive/terminated filtered later.
    */
   private async resolveCalendarEmployeeIds(
     dataSource: DataSource,
     organizationId: string,
     employeeId: string,
-    filter: 'me' | 'team',
+    filter: LeaveCalendarFilter,
   ): Promise<string[] | null> {
     if (filter === 'me') return [employeeId];
+    if (filter === 'organization') return null;
 
     const scoped = await this.resolveTeamOnLeaveEmployeeIds(
       dataSource,
@@ -923,6 +967,33 @@ export class EssLeaveCalendarService {
     );
     if (scoped === 'empty') return [];
     return scoped;
+  }
+
+  /**
+   * Keep only ACTIVE / PENDING_ACTIVATION employees among candidates
+   * (used for organization calendar so terminated leave does not surface).
+   */
+  private async filterVisibleRosterEmployeeIds(
+    dataSource: DataSource,
+    employeeIds: string[],
+  ): Promise<Set<string>> {
+    const unique = [...new Set(employeeIds.filter(Boolean))];
+    if (unique.length === 0) return new Set();
+
+    const rows = await dataSource
+      .getRepository(Employee)
+      .createQueryBuilder('e')
+      .select('e.id', 'id')
+      .where('e.id IN (:...ids)', { ids: unique })
+      .andWhere('e.status IN (:...statuses)', {
+        statuses: [
+          EmployeeStatus.ACTIVE,
+          EmployeeStatus.PENDING_ACTIVATION,
+        ],
+      })
+      .getRawMany<{ id: string }>();
+
+    return new Set(rows.map((r) => r.id));
   }
 }
 

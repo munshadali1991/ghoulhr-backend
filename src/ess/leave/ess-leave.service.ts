@@ -18,7 +18,7 @@ import {
   findEmployeeLeaveOverlappingRange,
   findLeaveRequestsOverlappingRange,
 } from './leave-request-query.util';
-import { EmployeeDocument } from '../../employees/entities/employee-document.entity';
+import { LeaveAttachment } from '../entities/leave-attachment.entity';
 import { Department } from '../../employees/entities/department.entity';
 import { Designation } from '../../employees/entities/designation.entity';
 import { EmployeeLeaveBalance } from '../entities/employee-leave-balance.entity';
@@ -585,25 +585,29 @@ export class EssLeaveService {
       );
 
       if (saved.supportingDocumentId) {
-        const docRepo = em.getRepository(EmployeeDocument);
-        const doc = await docRepo.findOne({
-          where: { id: saved.supportingDocumentId },
+        const attachmentRepo = em.getRepository(LeaveAttachment);
+        const attachment = await attachmentRepo.findOne({
+          where: { id: saved.supportingDocumentId, organizationId },
         });
         if (
-          doc?.storageDriver === STORAGE_DRIVERS.S3 &&
-          doc.storageKey
+          attachment?.storageDriver === STORAGE_DRIVERS.S3 &&
+          attachment.storageKey
         ) {
           const finalKey = await this.storageService.finalizeLeaveDocument(
             organizationId,
             employeeId,
             saved.id,
-            doc.storageKey,
-            doc.fileName,
+            attachment.storageKey,
+            attachment.fileName,
           );
-          if (finalKey !== doc.storageKey) {
-            doc.storageKey = finalKey;
-            await docRepo.save(doc);
+          attachment.leaveRequestId = saved.id;
+          if (finalKey !== attachment.storageKey) {
+            attachment.storageKey = finalKey;
           }
+          await attachmentRepo.save(attachment);
+        } else if (attachment) {
+          attachment.leaveRequestId = saved.id;
+          await attachmentRepo.save(attachment);
         }
       }
 
@@ -648,10 +652,11 @@ export class EssLeaveService {
     dto: CreateLeaveRequestDto,
   ): Promise<string | null> {
     if (dto.supportingDocumentId) {
-      const existing = await em.getRepository(EmployeeDocument).findOne({
+      const existing = await em.getRepository(LeaveAttachment).findOne({
         where: {
           id: dto.supportingDocumentId,
-          employee: { id: employeeId },
+          organizationId,
+          employeeId,
         },
       });
       if (!existing) {
@@ -666,15 +671,24 @@ export class EssLeaveService {
         throw new BadRequestException('Invalid supporting document storage key');
       }
 
-      const saved = await em.getRepository(EmployeeDocument).save(
-        em.getRepository(EmployeeDocument).create({
-          employee,
-          documentType: doc.documentType || 'LEAVE_SUPPORTING',
+      const storageKey = doc.storageKey.trim();
+      const duplicateKey = await em.getRepository(LeaveAttachment).findOne({
+        where: { storageKey },
+      });
+      if (duplicateKey) {
+        throw new BadRequestException('Supporting document storage key is already in use');
+      }
+
+      const saved = await em.getRepository(LeaveAttachment).save(
+        em.getRepository(LeaveAttachment).create({
+          organizationId,
+          employeeId,
+          leaveRequestId: null,
           fileName: doc.fileName,
           mimeType: doc.mimeType,
           sizeBytes: doc.sizeBytes ?? 0,
           storageDriver: STORAGE_DRIVERS.S3,
-          storageKey: doc.storageKey.trim(),
+          storageKey,
           payloadEnc: null,
           uploadedBy: employeeId,
           verificationStatus: 'PENDING',
@@ -693,10 +707,11 @@ export class EssLeaveService {
       throw new BadRequestException('Supporting document exceeds size limit');
     }
 
-    const saved = await em.getRepository(EmployeeDocument).save(
-      em.getRepository(EmployeeDocument).create({
-        employee,
-        documentType: doc.documentType,
+    const saved = await em.getRepository(LeaveAttachment).save(
+      em.getRepository(LeaveAttachment).create({
+        organizationId,
+        employeeId,
+        leaveRequestId: null,
         fileName: doc.fileName,
         mimeType: doc.mimeType,
         sizeBytes: approxBytes,
@@ -837,7 +852,7 @@ export class EssLeaveService {
     };
   }
 
-  private mapDocumentMeta(doc?: EmployeeDocument | null) {
+  private mapDocumentMeta(doc?: LeaveAttachment | null) {
     if (!doc) return null;
     return {
       id: doc.id,
@@ -1236,10 +1251,11 @@ export class EssLeaveService {
       throw new NotFoundException('Supporting document not found');
     }
 
-    const download = await this.storageService.getDocumentDownload(
+    const download = await this.storageService.getLeaveAttachmentDownload(
       dataSource,
       organizationId,
       row.supportingDocumentId,
+      'download',
     );
 
     if (download.mode === 'signedUrl') {

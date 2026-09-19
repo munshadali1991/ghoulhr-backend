@@ -19,6 +19,10 @@ import { EmployeeEmploymentDetail } from './entities/employee-employment-detail.
 import { EmployeeSalaryDetail } from './entities/employee-salary-detail.entity';
 import { EmployeeBankDetail } from './entities/employee-bank-detail.entity';
 import { EmployeeDocument } from './entities/employee-document.entity';
+import {
+  isOnboardingDocumentType,
+  ONBOARDING_DOCUMENT_TYPES,
+} from './constants/onboarding-document-types';
 import { EmployeeAccessControl } from './entities/employee-access.entity';
 import { EmployeeAuditLog } from './entities/employee-audit-log.entity';
 import { EmployeeEmergencyContact } from './entities/employee-emergency-contact.entity';
@@ -771,7 +775,11 @@ export class EmployeesService {
       const deleteIds = (deletedDocumentIds || []).filter(Boolean);
       if (deleteIds.length) {
         const docsToRemove = await docRepo.find({
-          where: { id: In(deleteIds), employee: { id: savedEmployee.id } },
+          where: {
+            id: In(deleteIds),
+            employee: { id: savedEmployee.id },
+            documentType: In([...ONBOARDING_DOCUMENT_TYPES]),
+          },
         });
         for (const doc of docsToRemove) {
           if (
@@ -781,18 +789,28 @@ export class EmployeesService {
             await this.storageService.deleteStorageKey(doc.storageKey);
           }
         }
-        await docRepo
-          .createQueryBuilder()
-          .delete()
-          .from(EmployeeDocument)
-          .where('id IN (:...deleteIds)', { deleteIds })
-          .andWhere('"employeeId" = :employeeId', { employeeId: savedEmployee.id })
-          .execute();
+        const removableIds = docsToRemove.map((d) => d.id);
+        if (removableIds.length) {
+          await docRepo
+            .createQueryBuilder()
+            .delete()
+            .from(EmployeeDocument)
+            .where('id IN (:...deleteIds)', { deleteIds: removableIds })
+            .andWhere('"employeeId" = :employeeId', { employeeId: savedEmployee.id })
+            .andWhere('"documentType" IN (:...types)', {
+              types: [...ONBOARDING_DOCUMENT_TYPES],
+            })
+            .execute();
+        }
       }
 
-      const existingDocCount = await docRepo.count({
-        where: { employee: { id: savedEmployee.id } },
-      });
+      const existingDocCount = await docRepo
+        .createQueryBuilder('d')
+        .where('d.employeeId = :employeeId', { employeeId: savedEmployee.id })
+        .andWhere('d.documentType IN (:...types)', {
+          types: [...ONBOARDING_DOCUMENT_TYPES],
+        })
+        .getCount();
       const newDocs = (documents || []).filter(
         (d) => d.storageKey?.trim() || d.dataBase64?.trim(),
       );
@@ -873,17 +891,19 @@ export class EmployeesService {
 
     const docs = employee.documents as EmployeeDocument[] | undefined;
     plain.documents =
-      docs?.map((d) => ({
-        id: d.id,
-        documentType: d.documentType,
-        fileName: d.fileName,
-        mimeType: d.mimeType,
-        sizeBytes: d.sizeBytes,
-        verificationStatus: d.verificationStatus,
-        storageDriver: d.storageDriver,
-        hasFile: Boolean(d.storageKey || d.payloadEnc),
-        createdAt: d.createdAt,
-      })) ?? [];
+      docs
+        ?.filter((d) => isOnboardingDocumentType(d.documentType))
+        .map((d) => ({
+          id: d.id,
+          documentType: d.documentType,
+          fileName: d.fileName,
+          mimeType: d.mimeType,
+          sizeBytes: d.sizeBytes,
+          verificationStatus: d.verificationStatus,
+          storageDriver: d.storageDriver,
+          hasFile: Boolean(d.storageKey || d.payloadEnc),
+          createdAt: d.createdAt,
+        })) ?? [];
 
     const previewUrl = await this.resolveProfilePhotoPreview(
       employee.organizationId,
@@ -936,6 +956,11 @@ export class EmployeesService {
     organizationId?: string,
   ): Promise<void> {
     for (const d of documents.slice(0, 20)) {
+      if (!isOnboardingDocumentType(d.documentType)) {
+        throw new BadRequestException(
+          `Unsupported onboarding document type: ${d.documentType}`,
+        );
+      }
       if (d.storageKey?.trim()) {
         if (!organizationId) {
           throw new BadRequestException(

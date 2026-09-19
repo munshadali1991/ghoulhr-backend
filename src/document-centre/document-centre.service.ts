@@ -170,6 +170,7 @@ export class DocumentCentreService {
     const url = await this.s3Storage.getSignedPreviewUrl(
       doc.storageKey,
       doc.mimeType,
+      doc.originalFileName,
     );
 
     return {

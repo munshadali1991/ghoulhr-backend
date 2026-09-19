@@ -32,6 +32,13 @@ import { EssPerformanceController } from './performance/ess-performance.controll
 import { EssPerformanceService } from './performance/ess-performance.service';
 import { PerformanceMasterController } from './performance/performance-master.controller';
 import { PerformanceMasterService } from './performance/performance-master.service';
+import {
+  EssExpenseApprovalsController,
+  EssExpenseController,
+  EssExpenseFinanceController,
+  ExpenseSettingsController,
+} from './expense/ess-expense.controller';
+import { EssExpenseService } from './expense/ess-expense.service';
 
 @Module({
   imports: [
@@ -52,6 +59,10 @@ import { PerformanceMasterService } from './performance/performance-master.servi
     EssApprovalsController,
     EssPerformanceController,
     PerformanceMasterController,
+    EssExpenseController,
+    EssExpenseApprovalsController,
+    EssExpenseFinanceController,
+    ExpenseSettingsController,
   ],
   providers: [
     EssLeaveService,
@@ -72,6 +83,8 @@ import { PerformanceMasterService } from './performance/performance-master.servi
     PendingLeaveApprovalReminderService,
     PendingLeaveApprovalReminderCronService,
     FieldEncryptionService,
+    EssExpenseService,
   ],
+  exports: [EssAttendanceService, EssExpenseService],
 })
 export class EssModule {}

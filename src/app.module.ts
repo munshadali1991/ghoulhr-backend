@@ -23,6 +23,7 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { LeadsModule } from './leads/leads.module';
 import { DocumentCentreModule } from './document-centre/document-centre.module';
 import { SkillsModule } from './skills/skills.module';
+import { BiometricModule } from './biometric/biometric.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { SkillsModule } from './skills/skills.module';
     HrDashboardModule,
     DocumentCentreModule,
     SkillsModule,
+    BiometricModule,
   ],
   controllers: [AppController],
   providers: [AppService],

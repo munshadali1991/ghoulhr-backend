@@ -57,6 +57,7 @@ ghoulhr-backend/
 │   │                              # notifications, holidays, approvals, performance (+ master)
 │   ├── rbac/                      # Tenant RBAC admin + catalog + PermissionsGuard
 │   ├── skills/                    # Skill master, ESS skills, HR search
+│   ├── biometric/                 # ZKTeco ADMS push + device/mapping admin APIs
 │   ├── document-centre/
 │   ├── storage/                   # S3 upload / download / preview / purge
 │   ├── hr-dashboard/              # GET /dashboard/hr
@@ -456,7 +457,7 @@ Empty-day “placeholder” rows in the service are UI helpers, not stub endpoin
 | `PATCH` | `/ess/notifications/read-all` | same |
 | `PATCH` | `/ess/notifications/:id/read` | same |
 
-Notification items include `leaveRequestId` and `attendanceRegularizationRequestId` (either may be null). Types include leave applied/pending/approved/rejected and regularization pending/approved/rejected.
+Notification items include `leaveRequestId`, `attendanceRegularizationRequestId`, and `expenseClaimId` (any may be null). Types include leave, regularization, and expense pending/approved/rejected/sent-back/paid.
 
 ### Approvals — `ess/approvals`
 
@@ -477,8 +478,40 @@ Notification items include `leaveRequestId` and `attendanceRegularizationRequest
 | `POST` | `/ess/approvals/timesheet/bulk-approve` | `approvals.timesheet:act` |
 | `POST` | `/ess/approvals/timesheet/:id/approve` | `approvals.timesheet:act` |
 | `POST` | `/ess/approvals/timesheet/:id/reject` | `approvals.timesheet:act` |
+| `GET` | `/ess/approvals/expense` | `approvals.expense:read` |
+| `GET` | `/ess/approvals/expense/:id` | `approvals.expense:read` |
+| `GET` | `/ess/approvals/expense/:id/lines/:lineId/receipt` | `approvals.expense:read` |
+| `POST` | `/ess/approvals/expense/:id/approve` | `approvals.expense:act` |
+| `POST` | `/ess/approvals/expense/:id/reject` | `approvals.expense:act` |
+| `POST` | `/ess/approvals/expense/:id/send-back` | `approvals.expense:act` |
 
-Leave and regularization approval lists use the same access-scope pattern (`approvals.leave:read` / `approvals.attendance:read`: assigned approver, plus team/org when scope v2 is on). Regularization approve/reject reuse `ApproveApprovalDto` / `RejectApprovalDto`. Approve is idempotent on `PENDING` only.
+Leave, regularization, and expense manager approval lists use the same access-scope pattern (assigned approver, plus team/org when scope v2 is on). Regularization approve/reject reuse `ApproveApprovalDto` / `RejectApprovalDto`. Approve is idempotent on expected pending status only (concurrent second actor → 409).
+
+### Expense claims — `ess/expense`
+
+| Method | Path | Perm |
+|--------|------|------|
+| `GET` | `/ess/expense/categories` | `ess.expense:read` |
+| `GET` | `/ess/expense/claims` | `ess.expense:read` |
+| `GET` | `/ess/expense/claims/:id` | `ess.expense:read` |
+| `POST` | `/ess/expense/claims` | `ess.expense:apply` |
+| `PATCH` | `/ess/expense/claims/:id` | `ess.expense:apply` |
+| `POST` | `/ess/expense/claims/:id/lines` | `ess.expense:apply` |
+| `PATCH` | `/ess/expense/claims/:id/lines/:lineId` | `ess.expense:apply` |
+| `DELETE` | `/ess/expense/claims/:id/lines/:lineId` | `ess.expense:apply` |
+| `POST` | `/ess/expense/claims/:id/submit` | `ess.expense:apply` |
+| `POST` | `/ess/expense/claims/:id/withdraw` | `ess.expense:apply` |
+| `GET` | `/ess/expense/claims/:id/lines/:lineId/receipt` | `ess.expense:read` |
+| `GET` | `/ess/expense/finance/pending` | `expense.finance:read` |
+| `GET` | `/ess/expense/finance/payable` | `expense.finance:read` |
+| `GET` | `/ess/expense/finance/export` | `expense.finance:read` |
+| `GET` | `/ess/expense/finance/:id` | `expense.finance:read` |
+| `POST` | `/ess/expense/finance/:id/approve` | `expense.finance:act` |
+| `POST` | `/ess/expense/finance/:id/reject` | `expense.finance:act` |
+| `POST` | `/ess/expense/finance/:id/send-back` | `expense.finance:act` |
+| `POST` | `/ess/expense/finance/:id/mark-paid` | `expense.finance:act` |
+
+Settings: `GET/POST /settings/expense/categories`, `GET/POST /settings/expense/policy` (`settings.expense:read|write`). No payroll integration — settlement is Mark as Paid + CSV export.
 
 ### Performance runtime — `ess/performance`
 
@@ -658,7 +691,7 @@ All tenant tables in **`public`**.
 | Settings + public schema | `1770000000000`–`1776000000004` |
 | Locations / shifts | `1778000000000`, `1779000000000`, `1796000000000`, `1811000000000` |
 | Leave + balances + requests | `1780000000000`–`1784000000000`, `1783000000000`, `1790000000000`, `1793000000000`, `1797000000000` |
-| Attendance | `1786000000000`–`1788000000000`, `1796100000000`, `1812000000000`, `1815000000000`, `1816000000000` (regularization + notification FK) |
+| Attendance | `1786000000000`–`1788000000000`, `1796100000000`, `1812000000000`, `1815000000000`, `1816000000000` (regularization + notification FK), `1817000000000` (biometric devices / mapping) |
 | Reporting managers | `1789000000000` |
 | Calendars | `1791000000000`–`1792000000000` (legacy `organization_holidays` dropped after migrate) |
 | Timesheet | `1794000000000`–`1795000000000` |
@@ -807,6 +840,7 @@ Reference: `scripts/provision-tenant-ssl.sh`.
 
 ## Related documentation
 
+- [`BIOMETRIC.md`](BIOMETRIC.md) — ZKTeco/eSSL ADMS device setup, NTP, enrollment, unmapped punches  
 - [`src/modules/email/EMAIL.md`](src/modules/email/EMAIL.md) — mail catalog and gaps  
 - `docs/db-standards.md` — naming and migration conventions  
 - `docs/tenant-data-dictionary.md` — table dictionary (schema names may be historical; runtime is `public`)  
@@ -818,6 +852,7 @@ Reference: `scripts/provision-tenant-ssl.sh`.
 - Tenant employee HTTP uses **permissions**, not `@Roles(ORG_ADMIN|MANAGER)`.
 - Attendance shifts in API responses come from `work_shift_configurations`; legacy JSON `attendance.shifts` is migrated on read when needed.
 - Attendance regularization is live under ESS attendance + `/ess/approvals/attendance-regularization*`. It does not rewrite a day that already has a complete IN+OUT pair, and it does not send SES mail.
+- Biometric V1 is ZKTeco/eSSL ADMS HTTP push (`/iclock/*`); devices must use the tenant subdomain/port URL and be registered by serial before go-live.
 - Skills master is settings; ESS/HR skills map to the employees module entitlement.
 - Document centre and onboarding files prefer S3 when AWS env is set; inline base64 remains a driver.
-- 26 HTTP controllers are wired. Payroll and tracking are catalog/entitlement only.
+- Payroll and tracking are catalog/entitlement only.

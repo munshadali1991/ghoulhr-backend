@@ -30,6 +30,19 @@ export class AttendancePunch extends BaseEntity {
   @Column({ length: 32, default: 'WEB' })
   source: string;
 
+  @Column({ type: 'uuid', nullable: true })
+  deviceId?: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  deviceSerial?: string | null;
+
+  @Column({ type: 'int', nullable: true })
+  hardwareUserId?: number | null;
+
+  /** Idempotency key for device push retries. */
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  externalEventKey?: string | null;
+
   @Column({ type: 'double precision', nullable: true })
   latitude?: number | null;
 

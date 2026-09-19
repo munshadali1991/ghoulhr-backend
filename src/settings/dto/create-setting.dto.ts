@@ -30,6 +30,7 @@ import {
   ALLOWED_EMPLOYEE_FIELDS,
   VALID_WEEKDAYS,
   VALID_TRACKING_MODES,
+  VALID_PUNCH_DIRECTION_MODES,
 } from '../settings.constants';
 
 export class CreateSettingDto {
@@ -414,6 +415,26 @@ export class UpdateAttendanceSettingsDto {
   @IsString()
   @IsIn(VALID_TRACKING_MODES as readonly string[])
   tracking_mode?: string;
+
+  @ApiProperty({
+    example: 'smart_shift',
+    enum: VALID_PUNCH_DIRECTION_MODES,
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(VALID_PUNCH_DIRECTION_MODES as readonly string[])
+  punch_direction_mode?: string;
+
+  @ApiProperty({
+    example: 120,
+    required: false,
+    description: 'Discard duplicate biometric scans within this window (seconds)',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  biometric_dedupe_window_seconds?: number;
 
   @ApiProperty({ example: true, required: false })
   @IsOptional()

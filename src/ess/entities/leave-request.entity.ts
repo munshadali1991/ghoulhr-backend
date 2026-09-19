@@ -1,8 +1,8 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { BaseEntity } from '../../database/base.entity';
 import { Employee } from '../../employees/employee.entity';
-import { EmployeeDocument } from '../../employees/entities/employee-document.entity';
 import { LeaveConfiguration } from '../../settings/entities/leave-configuration.entity';
+import { LeaveAttachment } from './leave-attachment.entity';
 
 export enum LeaveRequestStatus {
   PENDING = 'PENDING',
@@ -72,9 +72,9 @@ export class LeaveRequest extends BaseEntity {
   @Column({ type: 'uuid', nullable: true })
   supportingDocumentId?: string | null;
 
-  @ManyToOne(() => EmployeeDocument, { onDelete: 'SET NULL' })
+  @ManyToOne(() => LeaveAttachment, { onDelete: 'SET NULL' })
   @JoinColumn({ name: 'supportingDocumentId' })
-  supportingDocument?: EmployeeDocument;
+  supportingDocument?: LeaveAttachment;
 
   @Column({ type: 'date' })
   appliedOn: string;

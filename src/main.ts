@@ -72,6 +72,8 @@ async function bootstrap() {
 
   app.useBodyParser('json', { limit: JSON_BODY_LIMIT });
   app.useBodyParser('urlencoded', { limit: JSON_BODY_LIMIT, extended: true });
+  // ZKTeco ADMS often posts ATTLOG as text/plain
+  app.useBodyParser('text', { type: 'text/*', limit: '2mb' });
 
   const originsRaw = configService.get<string>('WEB_APP_ORIGINS')?.trim();
   const webAppAllowlist = originsRaw
