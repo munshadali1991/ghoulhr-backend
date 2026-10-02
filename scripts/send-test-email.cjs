@@ -33,6 +33,7 @@ const TEMPLATE_KEYS = [
   'leave-approved',
   'timesheet-approved',
   'account-activated',
+  'pending-leave-approval-reminder',
 ];
 
 dotenv.config({ path: path.join(ROOT, '.env') });
@@ -118,6 +119,10 @@ function loadTemplateRenderers() {
       DIST_TEMPLATES,
       'account-activated.template.js',
     )).renderAccountActivatedEmail,
+    'pending-leave-approval-reminder': require(path.join(
+      DIST_TEMPLATES,
+      'pending-leave-approval-reminder.template.js',
+    )).renderPendingLeaveApprovalReminderEmail,
   };
 }
 
@@ -169,6 +174,28 @@ function buildSampleContext(templateKey) {
         organizationName,
         loginUrl,
       };
+    case 'pending-leave-approval-reminder': {
+      const appDomain = process.env.APP_DOMAIN || 'ghoulhr.com';
+      return {
+        approverName: 'John Manager',
+        pendingCount: 3,
+        approvalsUrl: `https://${subdomain}.${appDomain}/leave/requests`,
+        items: [
+          {
+            applicantName: 'Jane Doe',
+            leaveType: 'Annual Leave',
+            startDate: '28 Jul 2026',
+            endDate: '30 Jul 2026',
+          },
+          {
+            applicantName: 'Sam Worker',
+            leaveType: 'Sick Leave',
+            startDate: '29 Jul 2026',
+            endDate: '29 Jul 2026',
+          },
+        ],
+      };
+    }
     default:
       throw new Error(`Unknown template: ${templateKey}`);
   }

@@ -7,6 +7,15 @@ import { RbacPermission } from '../../rbac/entities/rbac-permission.entity';
 import { RbacRolePermission } from '../../rbac/entities/rbac-role-permission.entity';
 import { RbacEmployeeRoleAssignment } from '../../rbac/entities/rbac-employee-role-assignment.entity';
 import { RbacPermissionAuditLog } from '../../rbac/entities/rbac-permission-audit-log.entity';
+import { DocumentCentreDocument } from '../../document-centre/entities/document-centre-document.entity';
+import { DocumentCentreUploadBatch } from '../../document-centre/entities/document-centre-upload-batch.entity';
+import { SkillCategory } from '../../skills/entities/skill-category.entity';
+import { SkillSubcategory } from '../../skills/entities/skill-subcategory.entity';
+import { Skill } from '../../skills/entities/skill.entity';
+import { EmployeeSkill } from '../../skills/entities/employee-skill.entity';
+import { BiometricDevice } from '../../biometric/entities/biometric-device.entity';
+import { BiometricUnmappedPunch } from '../../biometric/entities/biometric-unmapped-punch.entity';
+import { BiometricAuditLog } from '../../biometric/entities/biometric-audit-log.entity';
 
 @Injectable()
 export class TenantConnectionManager implements OnModuleDestroy {
@@ -168,6 +177,18 @@ export class TenantConnectionManager implements OnModuleDestroy {
         __dirname + '/../../employees/entities/*.entity{.ts,.js}',
         __dirname + '/../../settings/entities/*.entity{.ts,.js}',
         __dirname + '/../../ess/entities/*.entity{.ts,.js}',
+        __dirname + '/../../skills/entities/*.entity{.ts,.js}',
+        __dirname + '/../../biometric/entities/*.entity{.ts,.js}',
+        // Explicit classes — globs alone can miss new folders until rebuild/cache refresh.
+        DocumentCentreDocument,
+        DocumentCentreUploadBatch,
+        SkillCategory,
+        SkillSubcategory,
+        Skill,
+        EmployeeSkill,
+        BiometricDevice,
+        BiometricUnmappedPunch,
+        BiometricAuditLog,
         // Tenant RBAC only — exclude master-catalog entities (PlatformModule, OrganizationModuleEntitlement).
         RbacRole,
         RbacPermission,

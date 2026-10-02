@@ -17,6 +17,7 @@ import { RequirePermissions } from '../../rbac/decorators/require-permissions.de
 import type { TenantRequest } from '../../common/middleware/tenant-resolver.middleware';
 import { EssLeaveService } from '../leave/ess-leave.service';
 import { EssTimesheetService } from '../timesheet/ess-timesheet.service';
+import { EssAttendanceRegularizationService } from '../attendance/ess-attendance-regularization.service';
 import { TeamTimesheetQueryDto } from '../timesheet/dto/team-timesheet-query.dto';
 import { BulkApproveTimesheetDto } from './dto/bulk-approve-timesheet.dto';
 import { RejectApprovalDto } from './dto/reject-approval.dto';
@@ -30,6 +31,7 @@ export class EssApprovalsController {
   constructor(
     private readonly essLeaveService: EssLeaveService,
     private readonly essTimesheetService: EssTimesheetService,
+    private readonly regularizationService: EssAttendanceRegularizationService,
   ) {}
 
   @Get('leave')
@@ -99,6 +101,70 @@ export class EssApprovalsController {
     @Body() dto: RejectApprovalDto,
   ) {
     return this.essLeaveService.rejectLeaveRequest(
+      req.tenantDataSource!,
+      req.organization!.id,
+      req.user!.sub,
+      id,
+      dto.reason,
+    );
+  }
+
+  @Get('attendance-regularization')
+  @RequirePermissions('approvals.attendance:read')
+  @ApiOperation({
+    summary: 'List attendance regularization requests pending approval',
+  })
+  listAttendanceRegularization(@Req() req: TenantRequest) {
+    return this.regularizationService.listPendingApprovals(
+      req.tenantDataSource!,
+      req.organization!.id,
+      req.user!.sub,
+    );
+  }
+
+  @Get('attendance-regularization/:id')
+  @RequirePermissions('approvals.attendance:read')
+  @ApiOperation({
+    summary: 'Get attendance regularization approval detail',
+  })
+  getAttendanceRegularizationDetail(
+    @Req() req: TenantRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.regularizationService.getApprovalDetail(
+      req.tenantDataSource!,
+      req.organization!.id,
+      req.user!.sub,
+      id,
+    );
+  }
+
+  @Post('attendance-regularization/:id/approve')
+  @RequirePermissions('approvals.attendance:act')
+  @ApiOperation({ summary: 'Approve a pending attendance regularization request' })
+  approveAttendanceRegularization(
+    @Req() req: TenantRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ApproveApprovalDto,
+  ) {
+    return this.regularizationService.approve(
+      req.tenantDataSource!,
+      req.organization!.id,
+      req.user!.sub,
+      id,
+      dto.notes,
+    );
+  }
+
+  @Post('attendance-regularization/:id/reject')
+  @RequirePermissions('approvals.attendance:act')
+  @ApiOperation({ summary: 'Reject a pending attendance regularization request' })
+  rejectAttendanceRegularization(
+    @Req() req: TenantRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectApprovalDto,
+  ) {
+    return this.regularizationService.reject(
       req.tenantDataSource!,
       req.organization!.id,
       req.user!.sub,

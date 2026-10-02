@@ -6,6 +6,8 @@ export const PLATFORM_MODULES = [
   { code: 'attendance', name: 'Attendance', description: 'Attendance tracking and policies' },
   { code: 'timesheet', name: 'Timesheet', description: 'Timesheet entry and configuration' },
   { code: 'payroll', name: 'Payroll', description: 'Payroll processing' },
+  { code: 'expense', name: 'Expense Claims', description: 'Expense reimbursement claims and settlement' },
+  { code: 'documents', name: 'Document Centre', description: 'Form 16, policies, and forms' },
   { code: 'tracking', name: 'Tracking', description: 'Employee tracking module' },
   { code: 'approvals', name: 'Approvals', description: 'Leave and timesheet approvals' },
   { code: 'performance', name: 'Performance', description: 'KRA and self-assessment' },
@@ -21,6 +23,7 @@ export const ALL_PLATFORM_MODULE_CODES: PlatformModuleCode[] =
 /** Maps a permission code prefix to its platform module. */
 export function permissionModuleCode(permissionCode: string): string {
   if (permissionCode.startsWith('settings.')) {
+    if (permissionCode.startsWith('settings.expense')) return 'expense';
     return 'settings';
   }
   if (permissionCode.startsWith('ess.')) {
@@ -28,10 +31,19 @@ export function permissionModuleCode(permissionCode: string): string {
     if (permissionCode.startsWith('ess.attendance')) return 'attendance';
     if (permissionCode.startsWith('ess.timesheet')) return 'timesheet';
     if (permissionCode.startsWith('ess.performance')) return 'performance';
+    if (permissionCode.startsWith('ess.documents')) return 'documents';
+    if (permissionCode.startsWith('ess.skills')) return 'employees';
+    if (permissionCode.startsWith('ess.expense')) return 'expense';
     return 'settings';
+  }
+  if (permissionCode.startsWith('expense.')) {
+    return 'expense';
   }
   if (permissionCode.startsWith('performance.')) {
     return 'performance';
+  }
+  if (permissionCode.startsWith('documents')) {
+    return 'documents';
   }
   if (permissionCode.startsWith('approvals.')) {
     if (permissionCode.startsWith('approvals.leave')) return 'approvals';

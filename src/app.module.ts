@@ -20,6 +20,11 @@ import { RbacModule } from './rbac/rbac.module';
 import { StorageModule } from './storage/storage.module';
 import { HrDashboardModule } from './hr-dashboard/hr-dashboard.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
+import { LeadsModule } from './leads/leads.module';
+import { DocumentCentreModule } from './document-centre/document-centre.module';
+import { SkillsModule } from './skills/skills.module';
+import { BiometricModule } from './biometric/biometric.module';
+import { PeopleModule } from './people/people.module';
 import { EmailModule } from './modules/email';
 
 @Module({
@@ -39,12 +44,17 @@ import { EmailModule } from './modules/email';
     UsersModule,
     OrganizationsModule,
     SubscriptionsModule,
+    LeadsModule,
     EmployeesModule,
+    PeopleModule,
     SettingsModule,
     EssModule,
     RbacModule,
     StorageModule,
     HrDashboardModule,
+    DocumentCentreModule,
+    SkillsModule,
+    BiometricModule,
     EmailModule,
   ],
   controllers: [AppController],

@@ -32,6 +32,11 @@ export class UploadFileDto {
   @IsUUID()
   leaveRequestId?: string;
 
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  expenseClaimId?: string;
+
   @ApiPropertyOptional({
     description: 'Wizard batch id for onboarding before employee exists',
   })

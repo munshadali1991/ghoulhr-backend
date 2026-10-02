@@ -104,6 +104,8 @@ export class EssNotificationsService {
       readAt: row.readAt?.toISOString() ?? null,
       createdAt: row.createdAt.toISOString(),
       leaveRequestId: row.leaveRequestId ?? null,
+      attendanceRegularizationRequestId:
+        row.attendanceRegularizationRequestId ?? null,
     };
   }
 }

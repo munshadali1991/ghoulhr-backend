@@ -26,6 +26,7 @@ export interface BuildObjectKeyParams {
   module?: StorageModule;
   employeeId?: string;
   leaveRequestId?: string;
+  expenseClaimId?: string;
   documentType?: string;
   documentId?: string;
   uploadBatchId?: string;
@@ -108,6 +109,11 @@ export class S3StorageService {
     if (params.category === 'organization-files') {
       if (params.module === 'branding') {
         storageKey = `${orgPrefix}/organization-files/branding/logo/${documentId}_${safeName}`;
+      } else if (params.module === 'document-centre') {
+        const docTypeSegment = (params.documentType || 'general')
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]+/g, '-');
+        storageKey = `${orgPrefix}/organization-files/document-centre/${docTypeSegment}/${documentId}_${safeName}`;
       } else {
         storageKey = `${orgPrefix}/organization-files/${params.module || 'misc'}/${documentId}_${safeName}`;
       }
@@ -125,6 +131,11 @@ export class S3StorageService {
     } else if (params.module === 'leave') {
       const leaveSegment = params.leaveRequestId || 'pending';
       storageKey = `${orgPrefix}/employee-documents/leave/${employeeSegment}/${leaveSegment}/${documentId}_${safeName}`;
+    } else if (params.module === 'expense') {
+      const claimSegment = params.expenseClaimId || 'pending';
+      storageKey = `${orgPrefix}/employee-documents/expense/${employeeSegment}/${claimSegment}/${documentId}_${safeName}`;
+    } else if (params.module === 'document-centre') {
+      storageKey = `${orgPrefix}/employee-documents/document-centre/${employeeSegment}/${docTypeSegment}/${documentId}_${safeName}`;
     } else {
       storageKey = `${orgPrefix}/employee-documents/onboarding/${employeeSegment}/${docTypeSegment}/${documentId}_${safeName}`;
     }
@@ -194,15 +205,25 @@ export class S3StorageService {
   async getSignedPreviewUrl(
     storageKey: string,
     contentType: string,
+    fileName?: string,
   ): Promise<string> {
     this.assertConfigured();
+    const command: {
+      Bucket: string;
+      Key: string;
+      ResponseContentType: string;
+      ResponseContentDisposition?: string;
+    } = {
+      Bucket: this.bucket,
+      Key: storageKey,
+      ResponseContentType: contentType,
+    };
+    if (fileName) {
+      command.ResponseContentDisposition = `inline; filename="${encodeURIComponent(fileName)}"`;
+    }
     return getSignedUrl(
       this.client,
-      new GetObjectCommand({
-        Bucket: this.bucket,
-        Key: storageKey,
-        ResponseContentType: contentType,
-      }),
+      new GetObjectCommand(command),
       { expiresIn: this.signedUrlTtlSeconds },
     );
   }

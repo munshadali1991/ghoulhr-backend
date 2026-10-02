@@ -48,7 +48,9 @@ export class StorageController {
     'employees:onboard',
     'employees:update',
     'ess.leave:apply',
+    'ess.expense:apply',
     'settings.organization:write',
+    'documents:write',
   )
   @ApiOperation({ summary: 'Upload a file to S3 (backend proxy)' })
   @ApiConsumes('multipart/form-data')

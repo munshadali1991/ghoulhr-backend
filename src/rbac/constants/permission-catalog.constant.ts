@@ -29,6 +29,7 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   perm('employees:reset-password', 'reset-password', 'Reset employee passwords'),
   perm('employees:reporting-manager:read', 'read', 'View reporting manager assignments'),
   perm('employees:reporting-manager:assign', 'assign', 'Assign reporting managers'),
+  perm('employees.skills:read', 'read', 'View employee skill profiles'),
 
   // Settings
   perm('settings.organization:read', 'read', 'View organization profile settings'),
@@ -47,24 +48,106 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
   perm('settings.locations:write', 'write', 'Update location configurations'),
   perm('settings.leave:read', 'read', 'View leave configurations'),
   perm('settings.leave:write', 'write', 'Update leave configurations'),
+  perm('settings.expense:read', 'read', 'View expense categories and policy'),
+  perm('settings.expense:write', 'write', 'Update expense categories and policy'),
   perm('settings.performance:read', 'read', 'View performance assessment master'),
   perm('settings.performance:write', 'write', 'Update performance assessment master'),
+  perm('settings.skills:read', 'read', 'View skills master'),
+  perm('settings.skills:write', 'write', 'Create and update skills master'),
+  perm(
+    'settings.biometric.devices:read',
+    'read',
+    'View biometric device registry',
+  ),
+  perm(
+    'settings.biometric.devices:write',
+    'write',
+    'Register and update biometric devices',
+  ),
+  perm(
+    'settings.biometric.mapping:read',
+    'read',
+    'View employee biometric ID mappings',
+  ),
+  perm(
+    'settings.biometric.mapping:write',
+    'write',
+    'Assign employee biometric IDs',
+  ),
 
   // ESS
   perm('ess.leave:read', 'read', 'View own leave data'),
   perm('ess.leave:apply', 'apply', 'Apply for leave'),
   perm('ess.attendance:read', 'read', 'View own attendance'),
   perm('ess.attendance:punch', 'punch', 'Sign in/out attendance'),
+  perm(
+    'ess.attendance.swipes:read',
+    'read',
+    'View employee swipe history for people in scope',
+  ),
+  perm(
+    'ess.attendance.regularization:apply',
+    'apply',
+    'Submit and withdraw own attendance regularization requests',
+  ),
+  perm(
+    'ess.attendance.live:read',
+    'read',
+    'View live biometric attendance feed',
+  ),
+  perm(
+    'ess.attendance.unmapped:read',
+    'read',
+    'View unmapped biometric punches',
+  ),
+  perm(
+    'ess.attendance.unmapped:write',
+    'write',
+    'Resolve unmapped biometric punches',
+  ),
   perm('ess.timesheet:read', 'read', 'View own timesheet'),
   perm('ess.timesheet:write', 'write', 'Edit own timesheet entries'),
   perm('ess.performance:read', 'read', 'View own performance assessments'),
   perm('ess.performance:write', 'write', 'Complete own self-assessment'),
+  perm('ess.documents:read', 'read', 'View own Form 16 and company documents'),
+  perm('ess.skills:read', 'read', 'View own skills'),
+  perm('ess.skills:write', 'write', 'Add and update own skills'),
+  perm('ess.expense:read', 'read', 'View own expense claims'),
+  perm('ess.expense:apply', 'apply', 'Create and submit expense claims'),
+
+  // Expense finance
+  perm('expense.finance:read', 'read', 'View finance expense queue and exports'),
+  perm(
+    'expense.finance:act',
+    'act',
+    'Finance-approve, reject, send back, and mark expense claims paid',
+  ),
+
+  // Document Centre (HR)
+  perm('documents:read', 'read', 'View all Document Centre records including confidential'),
+  perm('documents:write', 'write', 'Upload and manage Document Centre files'),
 
   // Approvals
   perm('approvals.leave:read', 'read', 'View leave requests pending approval'),
   perm('approvals.leave:act', 'act', 'Approve or reject leave requests'),
   perm('approvals.timesheet:read', 'read', 'View timesheets pending approval'),
   perm('approvals.timesheet:act', 'act', 'Approve or reject timesheets'),
+  perm(
+    'approvals.attendance:read',
+    'read',
+    'View attendance regularization requests pending approval',
+  ),
+  perm(
+    'approvals.attendance:act',
+    'act',
+    'Approve or reject attendance regularization requests',
+  ),
+  perm('approvals.expense:read', 'read', 'View expense claims pending manager approval'),
+  perm(
+    'approvals.expense:act',
+    'act',
+    'Approve, reject, or send back expense claims as manager',
+  ),
 
   // Performance (Manager & HR review)
   perm('performance.review:read', 'read', 'View team performance assessments'),
@@ -79,6 +162,21 @@ export const PERMISSION_CATALOG: PermissionDefinition[] = [
 
   // Dashboards
   perm('dashboard.ess:read', 'read', 'View employee home dashboard'),
+  perm(
+    'dashboard.ess.team-on-leave:read',
+    'read',
+    'View Team On Leave card on Employee home (approved leave for people in scope)',
+  ),
+  perm(
+    'dashboard.ess.track:read',
+    'read',
+    'View Track card on Employee home (own pending leave applications)',
+  ),
+  perm(
+    'dashboard.ess.who-is-in:read',
+    'read',
+    'View Who is in card and attendance roster for people in scope',
+  ),
   perm('dashboard.hr:read', 'read', 'View HR organization dashboard'),
   perm('dashboard.manager:read', 'read', 'View manager dashboard'),
   perm('dashboard.payroll:read', 'read', 'View payroll dashboard'),
@@ -104,25 +202,41 @@ const ESS_PERMISSIONS = [
   'ess.leave:apply',
   'ess.attendance:read',
   'ess.attendance:punch',
+  'ess.attendance.regularization:apply',
   'ess.timesheet:read',
   'ess.timesheet:write',
   'ess.performance:read',
   'ess.performance:write',
+  'ess.documents:read',
+  'ess.skills:read',
+  'ess.skills:write',
+  'ess.expense:read',
+  'ess.expense:apply',
   'dashboard.ess:read',
+  'dashboard.ess.track:read',
 ];
 
 const MANAGER_PERMISSIONS = [
   ...ESS_PERMISSIONS,
   'employees:read',
+  'employees.skills:read',
   'employees:reporting-manager:read',
   'approvals.leave:read',
   'approvals.leave:act',
   'approvals.timesheet:read',
   'approvals.timesheet:act',
+  'approvals.attendance:read',
+  'approvals.attendance:act',
+  'approvals.expense:read',
+  'approvals.expense:act',
   'performance.review:read',
   'performance.review:act',
   'dashboard.manager:read',
   'dashboard.approvals:read',
+  'dashboard.ess.team-on-leave:read',
+  'dashboard.ess.who-is-in:read',
+  'ess.attendance.swipes:read',
+  'ess.attendance.live:read',
 ];
 
 const HR_ADMIN_PERMISSIONS = [
@@ -146,10 +260,25 @@ const HR_ADMIN_PERMISSIONS = [
   'settings.locations:write',
   'settings.leave:read',
   'settings.leave:write',
+  'settings.expense:read',
+  'settings.expense:write',
   'settings.performance:read',
   'settings.performance:write',
+  'settings.skills:read',
+  'settings.skills:write',
   'settings.attendance:read',
   'settings.attendance:write',
+  'settings.biometric.devices:read',
+  'settings.biometric.devices:write',
+  'settings.biometric.mapping:read',
+  'settings.biometric.mapping:write',
+  'expense.finance:read',
+  'expense.finance:act',
+  'ess.attendance.live:read',
+  'ess.attendance.unmapped:read',
+  'ess.attendance.unmapped:write',
+  'documents:read',
+  'documents:write',
 ];
 
 const PAYROLL_ADMIN_PERMISSIONS = [
@@ -160,6 +289,8 @@ const PAYROLL_ADMIN_PERMISSIONS = [
   'payroll:run',
   'dashboard.payroll:read',
   'dashboard.hr:read',
+  'documents:read',
+  'documents:write',
 ];
 
 const ORG_ADMIN_PERMISSIONS = [...ALL_PERMISSION_CODES];
@@ -200,9 +331,18 @@ export const SYSTEM_ROLES: SystemRoleDefinition[] = [
     permissionCodes: [
       ...ESS_PERMISSIONS,
       'employees:read',
+      'employees.skills:read',
       'approvals.leave:read',
       'approvals.leave:act',
+      'approvals.attendance:read',
+      'approvals.attendance:act',
+      'approvals.expense:read',
+      'approvals.expense:act',
       'dashboard.approvals:read',
+      'dashboard.ess.team-on-leave:read',
+      'dashboard.ess.who-is-in:read',
+      'ess.attendance.swipes:read',
+      'ess.attendance.live:read',
     ],
     isSystem: true,
   },

@@ -2,9 +2,12 @@ import { Module } from '@nestjs/common';
 import { EmployeesModule } from '../employees/employees.module';
 import { SettingsModule } from '../settings/settings.module';
 import { EmailModule } from '../modules/email';
+import { OrganizationsModule } from '../organizations/organizations.module';
+import { DatabaseCoreModule } from '../core/database/database-core.module';
 import { FieldEncryptionService } from '../common/services/field-encryption.service';
 import { EssAttendanceController } from './attendance/ess-attendance.controller';
 import { EssAttendanceService } from './attendance/ess-attendance.service';
+import { EssAttendanceRegularizationService } from './attendance/ess-attendance-regularization.service';
 import { EssLeaveCalendarController } from './calendar/ess-leave-calendar.controller';
 import { EssLeaveCalendarService } from './calendar/ess-leave-calendar.service';
 import { EssHolidaysController } from './holidays/ess-holidays.controller';
@@ -18,6 +21,8 @@ import { LeaveDayCalculatorService } from './leave/leave-day-calculator.service'
 import { LeavePolicyService } from './leave/leave-policy.service';
 import { LeaveValidationService } from './leave/leave-validation.service';
 import { LeaveNotificationService } from './leave/leave-notification.service';
+import { PendingLeaveApprovalReminderService } from './leave/pending-leave-approval-reminder.service';
+import { PendingLeaveApprovalReminderCronService } from './leave/pending-leave-approval-reminder.cron';
 import { EssNotificationsController } from './notifications/ess-notifications.controller';
 import { EssNotificationsService } from './notifications/ess-notifications.service';
 import { EssTimesheetController } from './timesheet/ess-timesheet.controller';
@@ -27,9 +32,22 @@ import { EssPerformanceController } from './performance/ess-performance.controll
 import { EssPerformanceService } from './performance/ess-performance.service';
 import { PerformanceMasterController } from './performance/performance-master.controller';
 import { PerformanceMasterService } from './performance/performance-master.service';
+import {
+  EssExpenseApprovalsController,
+  EssExpenseController,
+  EssExpenseFinanceController,
+  ExpenseSettingsController,
+} from './expense/ess-expense.controller';
+import { EssExpenseService } from './expense/ess-expense.service';
 
 @Module({
-  imports: [EmployeesModule, SettingsModule, EmailModule],
+  imports: [
+    EmployeesModule,
+    SettingsModule,
+    EmailModule,
+    OrganizationsModule,
+    DatabaseCoreModule,
+  ],
   controllers: [
     EssLeaveController,
     EssLeaveCalendarController,
@@ -41,12 +59,17 @@ import { PerformanceMasterService } from './performance/performance-master.servi
     EssApprovalsController,
     EssPerformanceController,
     PerformanceMasterController,
+    EssExpenseController,
+    EssExpenseApprovalsController,
+    EssExpenseFinanceController,
+    ExpenseSettingsController,
   ],
   providers: [
     EssLeaveService,
     EssLeaveCalendarService,
     EssHolidaysService,
     EssAttendanceService,
+    EssAttendanceRegularizationService,
     EssHomeService,
     EssNotificationsService,
     EssTimesheetService,
@@ -57,7 +80,11 @@ import { PerformanceMasterService } from './performance/performance-master.servi
     LeaveDayCalculatorService,
     LeaveValidationService,
     LeaveNotificationService,
+    PendingLeaveApprovalReminderService,
+    PendingLeaveApprovalReminderCronService,
     FieldEncryptionService,
+    EssExpenseService,
   ],
+  exports: [EssAttendanceService, EssExpenseService],
 })
 export class EssModule {}
