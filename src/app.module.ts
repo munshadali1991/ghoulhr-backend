@@ -24,6 +24,7 @@ import { LeadsModule } from './leads/leads.module';
 import { DocumentCentreModule } from './document-centre/document-centre.module';
 import { SkillsModule } from './skills/skills.module';
 import { BiometricModule } from './biometric/biometric.module';
+import { PeopleModule } from './people/people.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { BiometricModule } from './biometric/biometric.module';
     SubscriptionsModule,
     LeadsModule,
     EmployeesModule,
+    PeopleModule,
     SettingsModule,
     EssModule,
     RbacModule,
