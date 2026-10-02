@@ -128,6 +128,9 @@ export class EmployeeCredentialsResponseDto {
 
   @ApiProperty({ default: true })
   mustChangeOnFirstLogin: boolean;
+
+  @ApiProperty({ required: false })
+  loginUrl?: string;
 }
 
 export class EmployeeResponseDto {
@@ -201,10 +204,31 @@ export class ChangePasswordDto {
 
 export class ResetPasswordResponseDto {
   @ApiProperty()
+  employeeId: string;
+
+  @ApiProperty()
+  employeeCode: string;
+
+  @ApiProperty()
+  name: string;
+
+  @ApiProperty()
+  email: string;
+
+  @ApiProperty()
   temporaryPassword: string;
 
   @ApiProperty()
   expiresAt: Date;
+
+  @ApiProperty()
+  loginUrl: string;
+
+  @ApiProperty()
+  mustChangeOnFirstLogin: boolean;
+
+  @ApiProperty()
+  organizationName: string;
 
   @ApiProperty()
   message: string;

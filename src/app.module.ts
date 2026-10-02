@@ -25,6 +25,7 @@ import { DocumentCentreModule } from './document-centre/document-centre.module';
 import { SkillsModule } from './skills/skills.module';
 import { BiometricModule } from './biometric/biometric.module';
 import { PeopleModule } from './people/people.module';
+import { EmailModule } from './modules/email';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { PeopleModule } from './people/people.module';
     DocumentCentreModule,
     SkillsModule,
     BiometricModule,
+    EmailModule,
   ],
   controllers: [AppController],
   providers: [AppService],

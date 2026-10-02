@@ -184,6 +184,30 @@ export class EmailService {
     });
   }
 
+  async sendTestEmail(params: {
+    to: string;
+    subject?: string;
+    message?: string;
+  }): Promise<boolean> {
+    const subject = params.subject?.trim() || 'GhoulHR SES test email';
+    const message =
+      params.message?.trim() ||
+      'This is a test email from GhoulHR using Amazon SES SMTP. If you received it, email delivery is working.';
+    const safeHtml = message
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll('\n', '<br />');
+
+    return this.sesMailer.sendMail({
+      to: params.to,
+      subject,
+      text: message,
+      html: `<p>${safeHtml}</p>`,
+    });
+  }
+
   private buildTenantLoginUrl(subdomain: string): string {
     return this.buildTenantPathUrl(subdomain, '/login');
   }

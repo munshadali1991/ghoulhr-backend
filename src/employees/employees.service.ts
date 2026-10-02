@@ -154,7 +154,7 @@ export class EmployeesService {
     await this.assignEmployeeRbacRole(
       dataSource,
       savedEmployee.id,
-      employeeRoleToRoleCode(savedEmployee.role),
+      employeeRoleToRoleCode(savedEmployee.role ?? EmployeeRole.EMPLOYEE),
       createdBy,
     );
 
@@ -579,8 +579,12 @@ export class EmployeesService {
     const loginEmail = (
       basic.officialEmail?.trim() ||
       basic.personalEmail?.trim() ||
-      existingEmployee.email
+      existingEmployee.email ||
+      ''
     ).toLowerCase();
+    if (!loginEmail) {
+      throw new BadRequestException('Employee email is required');
+    }
     const otherEmployeeWithEmail = await employeeRepo.findOne({ where: { email: loginEmail } });
     if (otherEmployeeWithEmail && otherEmployeeWithEmail.id !== employeeId) {
       throw new ConflictException('Another employee already uses this login email');
@@ -594,7 +598,8 @@ export class EmployeesService {
     const personalEmail = (
       basic.personalEmail?.trim() ||
       existingEmployee.personalEmail ||
-      existingEmployee.email
+      existingEmployee.email ||
+      loginEmail
     )
       .toLowerCase()
       .trim();
@@ -918,7 +923,7 @@ export class EmployeesService {
   }
 
   async resolveProfilePhotoPreview(
-    organizationId: string | undefined,
+    organizationId: string | null | undefined,
     profilePhotoStorageKey: string | null | undefined,
     profilePhotoUrl: string | null | undefined,
   ): Promise<string | null> {
@@ -953,7 +958,7 @@ export class EmployeesService {
     employee: Employee,
     documents: OnboardingDocumentDto[],
     actorUuid: string,
-    organizationId?: string,
+    organizationId?: string | null,
   ): Promise<void> {
     for (const d of documents.slice(0, 20)) {
       if (!isOnboardingDocumentType(d.documentType)) {
@@ -1120,8 +1125,8 @@ export class EmployeesService {
   }
 
   private async validateDepartmentAndDesignation(
-    departmentId: string | undefined,
-    designationId: string | undefined,
+    departmentId: string | null | undefined,
+    designationId: string | null | undefined,
     dataSource: DataSource,
   ): Promise<{ departmentName: string; designationName: string } | null> {
     if (!departmentId && !designationId) {
@@ -1194,7 +1199,7 @@ export class EmployeesService {
       .getOne();
 
     let sequence = 1;
-    if (lastEmployee) {
+    if (lastEmployee?.employeeCode) {
       // Extract sequence from last employee code (e.g., "ACME-2026-0045" -> 45)
       const parts = lastEmployee.employeeCode.split('-');
       if (parts.length === 3) {
@@ -1315,11 +1320,11 @@ export class EmployeesService {
   ): Promise<Employee> {
     const repo = dataSource.getRepository(Employee);
     const employee = await repo.findOne({ where: { id: employeeId } });
-    if (organizationId) {
-      employee.organizationId = organizationId;
-    }
     if (!employee) {
       throw new BadRequestException('Employee not found');
+    }
+    if (organizationId) {
+      employee.organizationId = organizationId;
     }
 
     if (dto.email && dto.email.trim().toLowerCase() !== employee.email) {
@@ -1373,7 +1378,7 @@ export class EmployeesService {
 
     const passwordMatches = await this.passwordService.verifyPassword(
       password,
-      employee.password,
+      employee.password ?? '',
     );
 
     if (!passwordMatches) {
@@ -1387,7 +1392,7 @@ export class EmployeesService {
       return;
     }
 
-    if (employee.failedLoginAttempts > 0 || employee.lockedUntil) {
+    if ((employee.failedLoginAttempts ?? 0) > 0 || employee.lockedUntil) {
       await repo.update(employeeId, {
         failedLoginAttempts: 0,
         lockedUntil: null,
@@ -1424,12 +1429,46 @@ export class EmployeesService {
   }
 
   /**
-   * Reset employee password (admin action)
+   * Reset employee password (admin action).
+   * Forces must-change-password on next login with the temporary credentials.
    */
   async resetPassword(
     employeeId: string,
     dataSource: DataSource,
-  ): Promise<{ temporaryPassword: string; expiresAt: Date }> {
+  ): Promise<{
+    employee: Employee;
+    temporaryPassword: string;
+    expiresAt: Date;
+  }> {
+    const repo = dataSource.getRepository(Employee);
+    const employee = await repo.findOne({ where: { id: employeeId } });
+    if (!employee) {
+      throw new BadRequestException('Employee not found');
+    }
+
+    const temporaryPassword = this.passwordService.generateTemporaryPassword();
+    const expiresAt = await this.forceSetTemporaryPassword(
+      employeeId,
+      temporaryPassword,
+      dataSource,
+    );
+
+    const refreshed = await repo.findOne({ where: { id: employeeId } });
+    return {
+      employee: refreshed || employee,
+      temporaryPassword,
+      expiresAt,
+    };
+  }
+
+  /**
+   * Force-set a known temporary password (used when syncing master + tenant hashes).
+   */
+  async forceSetTemporaryPassword(
+    employeeId: string,
+    temporaryPassword: string,
+    dataSource: DataSource,
+  ): Promise<Date> {
     const repo = dataSource.getRepository(Employee);
     const employee = await repo.findOne({ where: { id: employeeId } });
 
@@ -1437,7 +1476,6 @@ export class EmployeesService {
       throw new BadRequestException('Employee not found');
     }
 
-    const temporaryPassword = this.passwordService.generateTemporaryPassword();
     const hashedPassword =
       await this.passwordService.hashPassword(temporaryPassword);
     const expiresAt = this.passwordService.getTempPasswordExpiry();
@@ -1446,9 +1484,11 @@ export class EmployeesService {
       password: hashedPassword,
       mustChangePassword: true,
       passwordChangedAt: null,
+      failedLoginAttempts: 0,
+      lockedUntil: null,
     });
 
-    return { temporaryPassword, expiresAt };
+    return expiresAt;
   }
 
   /**
@@ -1477,8 +1517,11 @@ export class EmployeesService {
 
     if (!employee) return;
 
-    const newFailedAttempts = employee.failedLoginAttempts + 1;
-    const updates: Partial<Employee> = {
+    const newFailedAttempts = (employee.failedLoginAttempts ?? 0) + 1;
+    const updates: {
+      failedLoginAttempts: number;
+      lockedUntil?: Date;
+    } = {
       failedLoginAttempts: newFailedAttempts,
     };
 

@@ -1,18 +1,20 @@
 import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
+  BadRequestException,
   Body,
-  Param,
-  Query,
-  UseGuards,
-  Req,
+  Controller,
+  Delete,
+  Get,
   Logger,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
   UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { ConfigService } from '@nestjs/config';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiBody } from '@nestjs/swagger';
 import { EmployeesService, type CreateEmployeeResult } from './employees.service';
 import { ReportingManagersService } from './reporting-managers.service';
 import { AssignReportingManagerDto } from './dto/assign-reporting-manager.dto';
@@ -27,6 +29,7 @@ import {
   EmployeeOnboardingCreateDto,
 } from './dto/employee-onboarding.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
+import { EmailEmployeeCredentialsDto } from './dto/email-employee-credentials.dto';
 import { TenantAuthGuard } from '../auth/guards/tenant-auth.guard';
 import { SubscriptionGuard } from '../subscriptions/guards/subscription.guard';
 import { PermissionsGuard } from '../rbac/guards/permissions.guard';
@@ -35,6 +38,7 @@ import { AuthorizationService } from '../rbac/authorization.service';
 import { EmployeeScopeService } from '../rbac/employee-scope.service';
 import type { TenantRequest } from '../common/middleware/tenant-resolver.middleware';
 import { EmailService } from '../modules/email';
+import { buildTenantLoginUrl } from '../common/utils/tenant-login-url.util';
 
 @ApiTags('Employees')
 @ApiBearerAuth()
@@ -49,6 +53,7 @@ export class EmployeesController {
     private readonly authorizationService: AuthorizationService,
     private readonly employeeScopeService: EmployeeScopeService,
     private readonly emailService: EmailService,
+    private readonly configService: ConfigService,
   ) {}
 
   @Get()
@@ -102,6 +107,10 @@ export class EmployeesController {
       req.organization?.id,
     );
     this.notifyEmployeeCreated(req, result);
+    const loginUrl = buildTenantLoginUrl(
+      this.configService,
+      req.organization?.subdomain ?? '',
+    );
     return {
       employee: {
         id: result.employee.id,
@@ -121,6 +130,7 @@ export class EmployeesController {
         temporaryPassword: result.temporaryPassword,
         expiresAt: result.passwordExpiresAt,
         mustChangeOnFirstLogin: true,
+        loginUrl,
       },
       message: 'Employee created successfully. Share credentials securely.',
     };
@@ -275,6 +285,11 @@ export class EmployeesController {
 
     this.notifyEmployeeCreated(req, result);
 
+    const loginUrl = buildTenantLoginUrl(
+      this.configService,
+      req.organization?.subdomain ?? '',
+    );
+
     return {
       employee: {
         id: result.employee.id,
@@ -294,6 +309,7 @@ export class EmployeesController {
         temporaryPassword: result.temporaryPassword,
         expiresAt: result.passwordExpiresAt,
         mustChangeOnFirstLogin: true,
+        loginUrl,
       },
       message: 'Employee created successfully. Share credentials securely.',
     };
@@ -301,7 +317,10 @@ export class EmployeesController {
 
   @Post(':id/reset-password')
   @RequirePermissions('employees:reset-password')
-  @ApiOperation({ summary: 'Reset employee password (admin only)' })
+  @ApiOperation({
+    summary:
+      'Regenerate employee temporary password (must change on next login)',
+  })
   async resetPassword(
     @Req() req: TenantRequest,
     @Param('id') id: string,
@@ -314,11 +333,64 @@ export class EmployeesController {
       id,
       req.tenantDataSource,
     );
+    const organization = req.organization;
+    const loginUrl = buildTenantLoginUrl(
+      this.configService,
+      organization?.subdomain ?? '',
+    );
 
     return {
+      employeeId: result.employee.id,
+      employeeCode: result.employee.employeeCode,
+      name: result.employee.name,
+      email: result.employee.email,
       temporaryPassword: result.temporaryPassword,
       expiresAt: result.expiresAt,
-      message: 'Password reset successfully. Share new credentials securely.',
+      loginUrl,
+      mustChangeOnFirstLogin: true,
+      organizationName: organization?.name || '',
+      message:
+        'Password regenerated. Share credentials securely — employee must change password on next login.',
+    };
+  }
+
+  @Post(':id/email-credentials')
+  @RequirePermissions('employees:reset-password')
+  @ApiOperation({
+    summary: 'Email temporary credentials to an employee',
+  })
+  @ApiBody({ type: EmailEmployeeCredentialsDto })
+  async emailCredentials(
+    @Req() req: TenantRequest,
+    @Param('id') id: string,
+    @Body() dto: EmailEmployeeCredentialsDto,
+  ) {
+    const employee = await this.employeesService.findById(
+      id,
+      req.tenantDataSource,
+    );
+    if (!employee?.email) {
+      throw new BadRequestException('Employee email not found');
+    }
+
+    const organization = req.organization;
+    if (!organization?.name) {
+      throw new BadRequestException('Organization context missing');
+    }
+
+    await this.emailService.sendEmployeeCreated({
+      to: employee.email,
+      employeeName: employee.name,
+      organizationName: organization.name,
+      subdomain: organization.subdomain ?? '',
+      email: employee.email,
+      temporaryPassword: dto.temporaryPassword.trim(),
+    });
+
+    return {
+      ok: true,
+      to: employee.email,
+      message: `Credentials emailed to ${employee.email}`,
     };
   }
 

@@ -27,6 +27,7 @@ import { Role } from '../roles/roles.enum';
 import { Organization } from './organization.entity';
 import { OrganizationEntitlementService } from '../rbac/organization-entitlement.service';
 import { SetOrganizationModulesDto } from '../rbac/dto/rbac.dto';
+import { EmailAdminCredentialsDto } from './dto/email-admin-credentials.dto';
 import type { Request } from 'express';
 
 @ApiTags('Organizations')
@@ -107,6 +108,37 @@ export class OrganizationsController {
   @ApiResponse({ status: 404, description: 'Deleted organization not found' })
   restore(@Param('id') id: string) {
     return this.organizationsService.restore(id);
+  }
+
+  @Post('id/:id/regenerate-admin-password')
+  @ApiOperation({
+    summary: 'Regenerate organization admin temporary password',
+  })
+  @ApiParam({ name: 'id' })
+  @ApiResponse({ status: 201, description: 'Temporary credentials returned once' })
+  @ApiResponse({ status: 400, description: 'Admin email missing' })
+  @ApiResponse({ status: 404, description: 'Organization not found' })
+  regenerateAdminPassword(@Param('id') id: string) {
+    return this.organizationsService.regenerateAdminPassword(id);
+  }
+
+  @Post('id/:id/email-admin-credentials')
+  @ApiOperation({
+    summary: 'Email regenerated organization admin credentials',
+  })
+  @ApiParam({ name: 'id' })
+  @ApiBody({ type: EmailAdminCredentialsDto })
+  @ApiResponse({ status: 201, description: 'Credentials email sent' })
+  @ApiResponse({ status: 400, description: 'Missing admin email or password' })
+  @ApiResponse({ status: 404, description: 'Organization not found' })
+  emailAdminCredentials(
+    @Param('id') id: string,
+    @Body() dto: EmailAdminCredentialsDto,
+  ) {
+    return this.organizationsService.emailAdminCredentials(
+      id,
+      dto.temporaryPassword,
+    );
   }
 
   @Get('id/:id')
