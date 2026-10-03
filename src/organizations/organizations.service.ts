@@ -25,7 +25,6 @@ import { TenantSslProvisioningService } from './tenant-ssl-provisioning.service'
 import { OrganizationSubscriptionService } from '../subscriptions/organization-subscription.service';
 import { PasswordService } from '../common/services/password.service';
 import { EmailService } from '../modules/email/email.service';
-import { buildTenantLoginUrl } from '../common/utils/tenant-login-url.util';
 
 @Injectable()
 export class OrganizationsService {
@@ -556,6 +555,10 @@ export class OrganizationsService {
 
   async regenerateAdminPassword(organizationId: string) {
     const organization = await this.findById(organizationId);
+    if (!organization) {
+      throw new NotFoundException('Organization not found');
+    }
+
     const adminEmail = organization.adminEmail?.trim().toLowerCase();
     if (!adminEmail) {
       throw new BadRequestException(
@@ -627,6 +630,10 @@ export class OrganizationsService {
     temporaryPassword: string,
   ) {
     const organization = await this.findById(organizationId);
+    if (!organization) {
+      throw new NotFoundException('Organization not found');
+    }
+
     const adminEmail = organization.adminEmail?.trim().toLowerCase();
     if (!adminEmail) {
       throw new BadRequestException('Organization has no admin email.');
@@ -655,6 +662,11 @@ export class OrganizationsService {
   }
 
   private buildTenantLoginUrl(subdomain: string): string {
-    return buildTenantLoginUrl(this.configService, subdomain);
+    const appDomain =
+      this.configService.get<string>('APP_DOMAIN') || 'ghoulhr.com';
+    const host = subdomain?.trim()
+      ? `${subdomain.trim()}.${appDomain}`
+      : appDomain;
+    return `https://${host}/login`;
   }
 }
